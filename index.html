@@ -315,6 +315,7 @@ const { useState, useEffect, useMemo, useCallback, useRef } = React;
 const SUPABASE_URL = "https://stklkxnzxcecnmsdhxwk.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0a2xreG56eGNlY25tc2RoeHdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MTkyMjIsImV4cCI6MjEwMDI5NTIyMn0.ZG4h0Fb1KpYsUEKrU-aBIysqtQX9lV6mAvuDzqcyTxI";
 
+
 const sb = (SUPABASE_URL.startsWith("http"))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -332,6 +333,41 @@ const STATUS_COLOR = {
 const STATUS_BAR_COLOR = { added: "#94a3b8", in_progress: "#3b82f6", completed: "#10b981", abandoned: "#f43f5e" };
 const TYPE_LABEL = { private_mission: "私人任務", shared_mission: "分享任務" };
 const PERM_LABEL = { read_only: "唯讀", editable: "可編輯" };
+const PRIORITY_LEVELS = ["P1", "P2", "P3", "P4"];
+const DEFAULT_PRIORITY_LABELS = { P1: "P1", P2: "P2", P3: "P3", P4: "P4" };
+function priorityLabel(labels, p) {
+  return (labels && labels[p]) || DEFAULT_PRIORITY_LABELS[p] || p;
+}
+
+const SCALE_LEVELS = [1, 2, 3, 4, 5]; // 對應 S1~S5
+const DEFAULT_SCALE_LABELS = { S1: "S1", S2: "S2", S3: "S3", S4: "S4", S5: "S5" };
+function scaleLabel(labels, n) {
+  const key = "S" + n;
+  return (labels && labels[key]) || DEFAULT_SCALE_LABELS[key] || key;
+}
+
+// 緊急程度分數：依剩餘天數 x 與規模 s 計算（規格見 urgency-score-spec.md）
+function urgencyScore(x, s) {
+  if (x <= 0) return 2;
+  if (x >= s) return s / x;
+  return (-1 / s) * x + 2;
+}
+function remainingDays(dueDate) {
+  if (!dueDate) return null;
+  return (new Date(dueDate).getTime() - Date.now()) / 86400000;
+}
+
+const PRIORITY_SCORE_MAP = { P1: 1, P2: 2, P3: 3, P4: 4 };
+const DEFAULT_PRIORITY_WEIGHTS = { w1: 1, w2: 1 };
+function priorityImportanceScore(p) { return PRIORITY_SCORE_MAP[p] || 2; }
+function overallPriorityScore(m, weights) {
+  const w1 = (weights && Number(weights.w1)) || 0;
+  const w2 = (weights && Number(weights.w2)) || 0;
+  const importance = priorityImportanceScore(m.priority);
+  const rd = remainingDays(m.due_date);
+  const urgency = rd === null ? 0 : urgencyScore(rd, m.scale || 1);
+  return importance * w1 + urgency * w2;
+}
 
 function fmt(dt) {
   if (!dt) return "—";
@@ -342,6 +378,23 @@ function fmtDate(dt) {
   if (!dt) return "—";
   const d = new Date(dt);
   return d.toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+function sortMissions(list, mode, weights) {
+  const arr = [...list];
+  if (mode === "due_asc") {
+    arr.sort((a, b) => {
+      if (!a.due_date && !b.due_date) return 0;
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return new Date(a.due_date) - new Date(b.due_date);
+    });
+  } else if (mode === "priority_desc") {
+    arr.sort((a, b) => overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
+  } else {
+    arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }
+  return arr;
 }
 
 // 簡易圖示
@@ -420,10 +473,12 @@ function AuthScreen() {
 // =====================================================================
 // 新增任務 Modal
 // =====================================================================
-function NewMissionModal({ onClose, onCreated }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [priority, setPriority] = useState("P2");
+  const [scale, setScale] = useState(1);
   const [missionType, setMissionType] = useState("private_mission");
   const [permission, setPermission] = useState("read_only");
   const [busy, setBusy] = useState(false);
@@ -437,6 +492,7 @@ function NewMissionModal({ onClose, onCreated }) {
       const payload = {
         creator_id: user.id,
         title, content,
+        priority, scale,
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
         mission_type: missionType,
         shared_permission: missionType === "shared_mission" ? permission : null,
@@ -467,6 +523,28 @@ function NewMissionModal({ onClose, onCreated }) {
             <label className="text-xs text-slate-500">任務內容</label>
             <textarea required rows={4} value={content} onChange={e => setContent(e.target.value)}
               className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">重要性</label>
+            <div className="flex gap-2 mt-1">
+              {PRIORITY_LEVELS.map(p => (
+                <button key={p} type="button" onClick={() => setPriority(p)}
+                  className={"flex-1 py-2 rounded-lg text-sm font-medium " + (priority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                  {priorityLabel(priorityLabels, p)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">任務規模</label>
+            <div className="flex gap-2 mt-1">
+              {SCALE_LEVELS.map(n => (
+                <button key={n} type="button" onClick={() => setScale(n)}
+                  className={"flex-1 py-2 rounded-lg text-sm font-medium " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                  {scaleLabel(scaleLabels, n)}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -506,7 +584,7 @@ function NewMissionModal({ onClose, onCreated }) {
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [replyText, setReplyText] = useState("");
@@ -516,6 +594,8 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editDue, setEditDue] = useState("");
+  const [editPriority, setEditPriority] = useState("P2");
+  const [editScale, setEditScale] = useState(1);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -527,6 +607,8 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
     if (m) {
       setEditTitle(m.title); setEditContent(m.content);
       setEditDue(m.due_date ? m.due_date.slice(0, 16) : "");
+      setEditPriority(m.priority || "P2");
+      setEditScale(m.scale || 1);
     }
     const { data: u } = await sb.from("mission_updates")
       .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
@@ -560,7 +642,7 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
     setBusy(true); setErr(null);
     try {
       const { error } = await sb.from("missions").update({
-        title: editTitle, content: editContent,
+        title: editTitle, content: editContent, priority: editPriority, scale: editScale,
         due_date: editDue ? new Date(editDue).toISOString() : null,
       }).eq("id", missionId);
       if (error) throw error;
@@ -604,6 +686,9 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
               <div>建立時間：{fmt(mission.created_at)}</div>
               <div>最後更新：{fmt(mission.updated_at)}</div>
               <div>截止時間：{fmt(mission.due_date)}</div>
+              <div>重要性：{priorityLabel(priorityLabels, mission.priority)}</div>
+              <div>任務規模：{scaleLabel(scaleLabels, mission.scale)}</div>
+              <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); return rd === null ? "—" : urgencyScore(rd, mission.scale || 1).toFixed(2); })()}</div>
             </div>
             {isCreator && mission.status !== "completed" && mission.status !== "abandoned" && (
               <button onClick={() => setEditingBody(true)} className="text-xs text-blue-600 underline mb-2">編輯本文</button>
@@ -613,6 +698,28 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
           <div className="space-y-2 mb-3">
             <input value={editTitle} onChange={e => setEditTitle(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
             <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div>
+              <label className="text-xs text-slate-500">重要性</label>
+              <div className="flex gap-2 mt-1">
+                {PRIORITY_LEVELS.map(p => (
+                  <button key={p} type="button" onClick={() => setEditPriority(p)}
+                    className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editPriority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                    {priorityLabel(priorityLabels, p)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">任務規模</label>
+              <div className="flex gap-2 mt-1">
+                {SCALE_LEVELS.map(n => (
+                  <button key={n} type="button" onClick={() => setEditScale(n)}
+                    className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                    {scaleLabel(scaleLabels, n)}
+                  </button>
+                ))}
+              </div>
+            </div>
             <input type="datetime-local" value={editDue} onChange={e => setEditDue(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             <div className="flex gap-2">
               <button onClick={saveBodyEdit} disabled={busy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">儲存</button>
@@ -685,7 +792,7 @@ function MissionDetailModal({ missionId, currentUser, onClose, onChanged }) {
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen }) {
+function MissionListView({ missions, onOpen, priorityLabels }) {
   return (
     <div className="bg-white rounded-2xl shadow overflow-x-auto">
       <table className="w-full text-sm">
@@ -695,25 +802,33 @@ function MissionListView({ missions, onOpen }) {
             <th className="px-4 py-2 font-medium">建立成員</th>
             <th className="px-4 py-2 font-medium">最後更新</th>
             <th className="px-4 py-2 font-medium">任務標題</th>
+            <th className="px-4 py-2 font-medium">重要性</th>
+            <th className="px-4 py-2 font-medium">緊急度</th>
             <th className="px-4 py-2 font-medium">截止時間</th>
             <th className="px-4 py-2 font-medium">狀態</th>
           </tr>
         </thead>
         <tbody>
-          {missions.map(m => (
-            <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
-              <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>
-              <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>
-              <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>
-              <td className="px-4 py-3 font-medium">{m.title}</td>
-              <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>
-              <td className="px-4 py-3 whitespace-nowrap">
-                <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
-              </td>
-            </tr>
-          ))}
+          {missions.map(m => {
+            const rd = remainingDays(m.due_date);
+            const urgency = rd === null ? null : urgencyScore(rd, m.scale || 1);
+            return (
+              <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>
+                <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>
+                <td className="px-4 py-3 font-medium">{m.title}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{priorityLabel(priorityLabels, m.priority)}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{urgency === null ? "—" : urgency.toFixed(2)}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
+                </td>
+              </tr>
+            );
+          })}
           {missions.length === 0 && (
-            <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">目前沒有符合條件的任務</td></tr>
+            <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">目前沒有符合條件的任務</td></tr>
           )}
         </tbody>
       </table>
@@ -801,6 +916,93 @@ function GanttView({ missions, onOpen }) {
 // =====================================================================
 // 系統管理（個人資料 / 好友 / 搜尋）
 // =====================================================================
+// =====================================================================
+// 緊急程度分數曲線（互動預覽，邏輯對應 urgency-score-spec.md）
+// =====================================================================
+function UrgencyCurveChart({ scaleLabels }) {
+  const [s, setS] = useState(1);
+  const [hover, setHover] = useState(null); // { x, y, cx, cy }
+
+  const W = 720, H = 400;
+  const padL = 44, padR = 20, padT = 20, padB = 40;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const xMin = -1, xMax = 10, yMin = -1, yMax = 5;
+  const sx = x => padL + (x - xMin) / (xMax - xMin) * plotW;
+  const sy = y => padT + (yMax - y) / (yMax - yMin) * plotH;
+
+  const gridXs = [];
+  for (let gx = Math.ceil(xMin); gx <= xMax; gx++) gridXs.push(gx);
+  const gridYs = [];
+  for (let gy = Math.ceil(yMin); gy <= yMax; gy++) gridYs.push(gy);
+
+  let d = "";
+  const steps = Math.round((xMax - xMin) / 0.1);
+  for (let i = 0; i <= steps; i++) {
+    const x = +(xMin + i * 0.1).toFixed(1);
+    let y = urgencyScore(x, s);
+    if (y > yMax) y = yMax;
+    if (y < yMin) y = yMin;
+    d += (i === 0 ? "M " : "L ") + sx(x) + " " + sy(y) + " ";
+  }
+
+  const markers = [];
+  for (let x = 0; x <= xMax + 1e-9; x += 0.5) {
+    const xr = +x.toFixed(1);
+    const y = urgencyScore(xr, s);
+    const yDisp = Math.min(Math.max(y, yMin), yMax);
+    markers.push({ x: xr, y, cx: sx(xr), cy: sy(yDisp) });
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-xs text-slate-500">預覽規模：</span>
+        {SCALE_LEVELS.map(n => (
+          <button key={n} onClick={() => setS(n)}
+            className={"text-xs px-3 py-1.5 rounded-lg " + (s === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+            {scaleLabel(scaleLabels, n)}
+          </button>
+        ))}
+      </div>
+      <div className="relative">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-xl" style={{ background: "#0f1720" }}>
+          {gridXs.map(gx => (
+            <line key={"gx" + gx} x1={sx(gx)} y1={sy(yMin)} x2={sx(gx)} y2={sy(yMax)} stroke="#27394a" strokeWidth="1" />
+          ))}
+          {gridYs.map(gy => (
+            <line key={"gy" + gy} x1={sx(xMin)} y1={sy(gy)} x2={sx(xMax)} y2={sy(gy)} stroke="#27394a" strokeWidth="1" />
+          ))}
+          <line x1={sx(0)} y1={sy(yMin)} x2={sx(0)} y2={sy(yMax)} stroke="#5c7488" strokeWidth="2.5" />
+          <line x1={sx(xMin)} y1={sy(0)} x2={sx(xMax)} y2={sy(0)} stroke="#5c7488" strokeWidth="2.5" />
+          {gridXs.map(gx => (
+            <text key={"tx" + gx} x={sx(gx)} y={sy(0) + 18} textAnchor="middle" fontSize="11" fill="#93a4b3">{gx}</text>
+          ))}
+          {gridYs.filter(gy => gy !== 0).map(gy => (
+            <text key={"ty" + gy} x={sx(0) - 10} y={sy(gy) + 4} textAnchor="end" fontSize="11" fill="#93a4b3">{gy}</text>
+          ))}
+          <text x={sx(xMax) - 4} y={sy(0) - 12} textAnchor="end" fontSize="13" fontWeight="700" fill="#e8eef3">剩餘時間(天)</text>
+          <text x={sx(0) + 10} y={sy(yMax) + 16} textAnchor="start" fontSize="13" fontWeight="700" fill="#e8eef3">緊急程度分數</text>
+          <path d={d} fill="none" stroke="#4fd1c5" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          {markers.map((m, i) => (
+            <circle key={i} cx={m.cx} cy={m.cy} r={hover && hover.x === m.x ? 6 : 4.5}
+              fill={hover && hover.x === m.x ? "#f2a541" : "#16212c"} stroke="#f2a541" strokeWidth="2"
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHover(m)} onMouseLeave={() => setHover(null)} />
+          ))}
+        </svg>
+        {hover && (
+          <div className="absolute bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg pointer-events-none"
+            style={{ left: (hover.cx / W) * 100 + "%", top: (hover.cy / H) * 100 + "%", transform: "translate(-50%, -120%)" }}>
+            剩餘天數：{hover.x} 天，緊急分數：{hover.y.toFixed(2)}
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400 mt-2">滑鼠移到圖上的橘色圓點可以看到該天數對應的精確分數。</p>
+    </div>
+  );
+}
+
 function SettingsView({ profile, onProfileChange }) {
   const [displayName, setDisplayName] = useState(profile.display_name);
   const [isSearchable, setIsSearchable] = useState(profile.is_searchable);
@@ -811,6 +1013,98 @@ function SettingsView({ profile, onProfileChange }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [msg, setMsg] = useState(null);
+  const [priorityLabels, setPriorityLabels] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
+  const [editingLabels, setEditingLabels] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
+  const [savingLabels, setSavingLabels] = useState(false);
+
+  function startEditLabels() { setLabelDraft(priorityLabels); setEditingLabels(true); }
+
+  async function saveLabels() {
+    setSavingLabels(true);
+    const { error } = await sb.from("profiles").update({ priority_labels: labelDraft }).eq("id", profile.id);
+    setSavingLabels(false);
+    if (!error) {
+      setPriorityLabels(labelDraft);
+      onProfileChange({ ...profile, priority_labels: labelDraft });
+      setEditingLabels(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+
+  const [scaleLabels, setScaleLabels] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
+  const [editingScaleLabels, setEditingScaleLabels] = useState(false);
+  const [scaleLabelDraft, setScaleLabelDraft] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
+  const [savingScaleLabels, setSavingScaleLabels] = useState(false);
+
+  function startEditScaleLabels() { setScaleLabelDraft(scaleLabels); setEditingScaleLabels(true); }
+
+  async function saveScaleLabels() {
+    setSavingScaleLabels(true);
+    const { error } = await sb.from("profiles").update({ scale_labels: scaleLabelDraft }).eq("id", profile.id);
+    setSavingScaleLabels(false);
+    if (!error) {
+      setScaleLabels(scaleLabelDraft);
+      onProfileChange({ ...profile, scale_labels: scaleLabelDraft });
+      setEditingScaleLabels(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+
+  const [weights, setWeights] = useState(profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS);
+  const [editingWeights, setEditingWeights] = useState(false);
+  const [weightDraft, setWeightDraft] = useState({ w1: String((profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS).w1), w2: String((profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS).w2) });
+  const [savingWeights, setSavingWeights] = useState(false);
+  const [weightErr, setWeightErr] = useState(null);
+
+  function startEditWeights() {
+    setWeightDraft({ w1: String(weights.w1), w2: String(weights.w2) });
+    setWeightErr(null);
+    setEditingWeights(true);
+  }
+
+  function parseWeight(v) {
+    const n = Number(v);
+    if (v === "" || v === null || Number.isNaN(n) || !Number.isFinite(n) || n < 0) return null;
+    return n;
+  }
+
+  async function saveWeights() {
+    const w1 = parseWeight(weightDraft.w1);
+    const w2 = parseWeight(weightDraft.w2);
+    if (w1 === null || w2 === null) {
+      setWeightErr("請輸入有效的數字（需為 0 以上的數字）");
+      return;
+    }
+    setWeightErr(null);
+    setSavingWeights(true);
+    const newWeights = { w1, w2 };
+    const { error } = await sb.from("profiles").update({ priority_weights: newWeights }).eq("id", profile.id);
+    setSavingWeights(false);
+    if (!error) {
+      setWeights(newWeights);
+      onProfileChange({ ...profile, priority_weights: newWeights });
+      setEditingWeights(false);
+    } else {
+      setWeightErr(error.message);
+    }
+  }
+
+  async function resetWeights() {
+    setSavingWeights(true);
+    const { error } = await sb.from("profiles").update({ priority_weights: DEFAULT_PRIORITY_WEIGHTS }).eq("id", profile.id);
+    setSavingWeights(false);
+    if (!error) {
+      setWeights(DEFAULT_PRIORITY_WEIGHTS);
+      onProfileChange({ ...profile, priority_weights: DEFAULT_PRIORITY_WEIGHTS });
+      setEditingWeights(false);
+      setWeightErr(null);
+    } else {
+      setWeightErr(error.message);
+    }
+  }
 
   const loadFriends = useCallback(async () => {
     const uid = profile.id;
@@ -881,6 +1175,109 @@ function SettingsView({ profile, onProfileChange }) {
   }
 
   return (
+    <>
+      <div className="bg-white rounded-2xl shadow p-5 mb-4">
+        <h3 className="font-bold mb-2">重要 vs 緊急 － 優先級分數計算規則</h3>
+        <p className="text-xs text-slate-500 mb-1">每一個任務會有其（重要）、（緊急）兩個指標分數，依據本公式算出當前優先級分數，分數越高者排越前面，建議優先處理。</p>
+        <p className="text-xs text-slate-500 mb-4">使用者可以自行調配權值，譬如放比較多的權重在（重要性加乘：W1），或者（緊急度加乘：W2），以適配個人工作習慣。</p>
+
+        <div className="bg-slate-50 rounded-lg px-4 py-3 text-sm flex flex-wrap items-center gap-2">
+          <span className="text-slate-500 w-full mb-1">目前公式：</span>
+          <span>重要性分數 ×</span>
+          {editingWeights ? (
+            <input value={weightDraft.w1} onChange={e => setWeightDraft({ ...weightDraft, w1: e.target.value })}
+              className="w-16 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm" />
+          ) : (
+            <span className="bg-slate-200 text-slate-600 rounded-lg px-3 py-1 font-medium">{Number(weights.w1).toFixed(1)}</span>
+          )}
+          <span>+ 緊急度分數 ×</span>
+          {editingWeights ? (
+            <input value={weightDraft.w2} onChange={e => setWeightDraft({ ...weightDraft, w2: e.target.value })}
+              className="w-16 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm" />
+          ) : (
+            <span className="bg-slate-200 text-slate-600 rounded-lg px-3 py-1 font-medium">{Number(weights.w2).toFixed(1)}</span>
+          )}
+          <span>= 優先級分數</span>
+        </div>
+
+        {weightErr && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{weightErr}</div>}
+
+        <div className="flex gap-2 mt-3">
+          {!editingWeights ? (
+            <button onClick={startEditWeights} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>
+          ) : (
+            <>
+              <button onClick={saveWeights} disabled={savingWeights} className="text-xs bg-slate-900 text-white rounded-lg px-4 py-1.5 disabled:opacity-50">{savingWeights ? "儲存中…" : "儲存"}</button>
+              <button onClick={() => { setEditingWeights(false); setWeightErr(null); }} className="text-xs text-slate-500 px-4 py-1.5">取消</button>
+            </>
+          )}
+          <button onClick={resetWeights} disabled={savingWeights} className="text-xs bg-rose-50 text-rose-600 rounded-lg px-3 py-1.5 disabled:opacity-50">回到預設</button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow p-5 mb-4">
+        <h3 className="font-bold mb-3">顯示設定</h3>
+
+        <div className="flex justify-between items-center mb-2">
+          <h4 className="text-sm font-semibold text-slate-700">重要性顯示</h4>
+          {!editingLabels && <button onClick={startEditLabels} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">可以把 P1～P4 換成你自己習慣的名稱（例如「最緊急」），任務列表跟已完成任務清單都會跟著換成你設定的文字。</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {PRIORITY_LEVELS.map(p => (
+            <div key={p}>
+              <label className="text-xs text-slate-500">{p}</label>
+              {editingLabels ? (
+                <input value={labelDraft[p] || ""} onChange={e => setLabelDraft({ ...labelDraft, [p]: e.target.value })}
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              ) : (
+                <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm">{priorityLabels[p] || p}</div>
+              )}
+            </div>
+          ))}
+        </div>
+        {editingLabels && (
+          <div className="flex gap-2 mt-3">
+            <button onClick={saveLabels} disabled={savingLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingLabels ? "儲存中…" : "儲存"}</button>
+            <button onClick={() => setEditingLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mb-2 mt-6 pt-4 border-t border-slate-100">
+          <h4 className="text-sm font-semibold text-slate-700">任務規模顯示</h4>
+          {!editingScaleLabels && <button onClick={startEditScaleLabels} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
+        </div>
+        <p className="text-xs text-slate-500 mb-3">可以把 S1～S5 換成你自己習慣的名稱（例如「小任務」）。規模會用來計算下方的緊急程度分數。</p>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {SCALE_LEVELS.map(n => {
+            const key = "S" + n;
+            return (
+              <div key={key}>
+                <label className="text-xs text-slate-500">{key}</label>
+                {editingScaleLabels ? (
+                  <input value={scaleLabelDraft[key] || ""} onChange={e => setScaleLabelDraft({ ...scaleLabelDraft, [key]: e.target.value })}
+                    className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                ) : (
+                  <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm">{scaleLabels[key] || key}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {editingScaleLabels && (
+          <div className="flex gap-2 mt-3">
+            <button onClick={saveScaleLabels} disabled={savingScaleLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingScaleLabels ? "儲存中…" : "儲存"}</button>
+            <button onClick={() => setEditingScaleLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+          </div>
+        )}
+
+        <div className="mt-6 pt-4 border-t border-slate-100">
+          <h4 className="text-sm font-semibold text-slate-700 mb-2">緊急程度分數曲線</h4>
+          <p className="text-xs text-slate-500 mb-3">緊急程度分數依「剩餘時間」與「任務規模」計算，任務列表的「緊急度」欄位就是用這條曲線即時算出來的。</p>
+          <UrgencyCurveChart scaleLabels={scaleLabels} />
+        </div>
+      </div>
+
     <div className="grid md:grid-cols-2 gap-4">
       <div className="bg-white rounded-2xl shadow p-5">
         <h3 className="font-bold mb-3">我的會員資料</h3>
@@ -954,6 +1351,7 @@ function SettingsView({ profile, onProfileChange }) {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -968,6 +1366,12 @@ function Dashboard({ session, profile, setProfile }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState([]);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc
+  const [doneSearchInput, setDoneSearchInput] = useState("");
+  const [doneAppliedSearch, setDoneAppliedSearch] = useState("");
+  const [doneSortMode, setDoneSortMode] = useState("created_desc");
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
@@ -1005,6 +1409,28 @@ function Dashboard({ session, profile, setProfile }) {
   const visibleMissions = tab === "done"
     ? missions.filter(m => m.status === "completed")
     : missions.filter(m => statusFilter === "all" ? m.status !== "completed" : m.status === statusFilter);
+
+  const searchedMissions = (tab === "list" && appliedSearch)
+    ? visibleMissions.filter(m => {
+        const q = appliedSearch.toLowerCase();
+        return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
+      })
+    : visibleMissions;
+
+  const listMissions = tab === "list" ? sortMissions(searchedMissions, sortMode, profile.priority_weights) : searchedMissions;
+
+  const doneSearchedMissions = (tab === "done" && doneAppliedSearch)
+    ? visibleMissions.filter(m => {
+        const q = doneAppliedSearch.toLowerCase();
+        return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
+      })
+    : visibleMissions;
+  const doneMissions = tab === "done" ? sortMissions(doneSearchedMissions, doneSortMode, profile.priority_weights) : doneSearchedMissions;
+
+  function runSearch() { setAppliedSearch(searchInput.trim()); }
+  function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
+  function runDoneSearch() { setDoneAppliedSearch(doneSearchInput.trim()); }
+  function clearDoneSearch() { setDoneSearchInput(""); setDoneAppliedSearch(""); }
 
   return (
     <div className="min-h-screen">
@@ -1056,15 +1482,75 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
 
-        {tab === "list" && <MissionListView missions={visibleMissions} onOpen={setOpenMissionId} />}
+        {tab === "list" && (
+          <div className="bg-white rounded-2xl shadow p-4 mb-4">
+            <div className="flex gap-2">
+              <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && runSearch()}
+                placeholder="搜尋任務標題或內文…"
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
+                <Icon.Search className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
+              <p className="text-xs text-slate-500">
+                {appliedSearch
+                  ? `目前顯示是所有標題和內文含有「${appliedSearch}」的搜尋結果，共 ${listMissions.length} 筆`
+                  : `目前顯示全部任務，共 ${listMissions.length} 筆`}
+                {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
+              </p>
+              <div className="flex gap-1 text-xs">
+                <button onClick={() => setSortMode("created_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                <button onClick={() => setSortMode("due_asc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                <button onClick={() => setSortMode("priority_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "done" && (
+          <div className="bg-white rounded-2xl shadow p-4 mb-4">
+            <div className="flex gap-2">
+              <input value={doneSearchInput} onChange={e => setDoneSearchInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && runDoneSearch()}
+                placeholder="搜尋已完成任務標題或內文…"
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={runDoneSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
+                <Icon.Search className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
+              <p className="text-xs text-slate-500">
+                {doneAppliedSearch
+                  ? `目前顯示是所有標題和內文含有「${doneAppliedSearch}」的搜尋結果，共 ${doneMissions.length} 筆`
+                  : `目前顯示全部已完成任務，共 ${doneMissions.length} 筆`}
+                {doneAppliedSearch && <button onClick={clearDoneSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
+              </p>
+              <div className="flex gap-1 text-xs">
+                <button onClick={() => setDoneSortMode("created_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                <button onClick={() => setDoneSortMode("due_asc")}
+                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                <button onClick={() => setDoneSortMode("priority_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "list" && <MissionListView missions={listMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} />}
         {tab === "gantt" && <GanttView missions={visibleMissions} onOpen={setOpenMissionId} />}
-        {tab === "done" && <MissionListView missions={visibleMissions} onOpen={setOpenMissionId} />}
+        {tab === "done" && <MissionListView missions={doneMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} />}
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
-      {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} />}
+      {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} />}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
