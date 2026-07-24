@@ -348,23 +348,48 @@ const TASK_LIST_COLUMNS = [
 ];
 const DEFAULT_VISIBLE_COLUMNS = TASK_LIST_COLUMNS.reduce((acc, c) => { acc[c.key] = true; return acc; }, {});
 
-function ColumnSettingsModal({ visibleColumns, onToggle, onClose }) {
+const TASK_SECTIONS = [
+  { key: "open", label: "未結案任務" },
+  { key: "completed", label: "已完成任務" },
+  { key: "abandoned", label: "已棄置任務" },
+];
+const DEFAULT_VISIBLE_SECTIONS = TASK_SECTIONS.reduce((acc, s) => { acc[s.key] = true; return acc; }, {});
+
+function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleSections, onToggleSection, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold">顯示欄位設定</h2>
+          <h2 className="text-lg font-bold">任務列表顯示設定</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
-        <div className="space-y-2">
-          {TASK_LIST_COLUMNS.map(c => (
-            <label key={c.key} className="flex items-center gap-2 text-sm bg-slate-50 rounded-lg px-3 py-2">
-              <input type="checkbox" checked={!!visibleColumns[c.key]} onChange={() => onToggle(c.key)} className="w-4 h-4" />
-              {c.label}
-            </label>
-          ))}
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <h3 className="font-bold mb-3 text-sm">顯示欄位設定</h3>
+            <div className="space-y-2">
+              {TASK_LIST_COLUMNS.map(c => (
+                <label key={c.key} className="flex items-center gap-2 text-sm bg-white rounded-lg px-3 py-2">
+                  <input type="checkbox" checked={!!visibleColumns[c.key]} onChange={() => onToggleColumn(c.key)} className="w-4 h-4" />
+                  {c.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400 mt-3">勾選的欄位會顯示在任務列表；取消勾選則隱藏該欄位。</p>
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <h3 className="font-bold mb-3 text-sm">顯示區塊設定</h3>
+            <div className="space-y-2">
+              {TASK_SECTIONS.map(s => (
+                <label key={s.key} className="flex items-center gap-2 text-sm bg-white rounded-lg px-3 py-2">
+                  <input type="checkbox" checked={!!visibleSections[s.key]} onChange={() => onToggleSection(s.key)} className="w-4 h-4" />
+                  {s.label}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400 mt-3">勾選的區塊會顯示在任務列表頁面；取消勾選則整個區塊隱藏。</p>
+          </div>
         </div>
-        <p className="text-xs text-slate-400 mt-3">勾選的欄位會顯示在任務列表；取消勾選則隱藏該欄位。</p>
       </div>
     </div>
   );
@@ -722,6 +747,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [editDue, setEditDue] = useState("");
   const [editPriority, setEditPriority] = useState("P2");
   const [editScale, setEditScale] = useState(1);
+  const [editMissionType, setEditMissionType] = useState("private_mission");
+  const [editPermission, setEditPermission] = useState("read_only");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -735,6 +762,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setEditDue(m.due_date ? m.due_date.slice(0, 16) : "");
       setEditPriority(m.priority || "P2");
       setEditScale(m.scale || 1);
+      setEditMissionType(m.mission_type);
+      setEditPermission(m.shared_permission || "read_only");
     }
     const { data: u } = await sb.from("mission_updates")
       .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
@@ -770,6 +799,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       const { error } = await sb.from("missions").update({
         title: editTitle, content: editContent, priority: editPriority, scale: editScale,
         due_date: editDue ? new Date(editDue).toISOString() : null,
+        mission_type: editMissionType,
+        shared_permission: editMissionType === "shared_mission" ? editPermission : null,
       }).eq("id", missionId);
       if (error) throw error;
       setEditingBody(false);
@@ -847,6 +878,24 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
             </div>
             <input type="datetime-local" value={editDue} onChange={e => setEditDue(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div>
+              <label className="text-xs text-slate-500">任務類型</label>
+              <select value={editMissionType} onChange={e => setEditMissionType(e.target.value)}
+                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                <option value="private_mission">私人任務（只有我看得到）</option>
+                <option value="shared_mission">分享任務（所有好友都看得到）</option>
+              </select>
+              {editMissionType === "shared_mission" && (
+                <select value={editPermission} onChange={e => setEditPermission(e.target.value)}
+                  className="mt-2 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="read_only">唯讀（好友只能看，不能回覆更新）</option>
+                  <option value="editable">可編輯（好友可以回覆更新任務）</option>
+                </select>
+              )}
+              {mission.mission_type === "shared_mission" && editMissionType === "private_mission" && (
+                <p className="text-xs text-amber-600 mt-1">改回私人後，好友將立刻看不到這筆任務、也無法再回覆；但你自己仍看得到他們之前留下的回覆紀錄。</p>
+              )}
+            </div>
             <div className="flex gap-2">
               <button onClick={saveBodyEdit} disabled={busy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">儲存</button>
               <button onClick={() => setEditingBody(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
@@ -1577,6 +1626,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [showNew, setShowNew] = useState(false);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
+  const [visibleSections, setVisibleSections] = useState(DEFAULT_VISIBLE_SECTIONS);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState([]);
   const [searchInput, setSearchInput] = useState("");
@@ -1629,11 +1679,17 @@ function Dashboard({ session, profile, setProfile }) {
   const completedMissions = sortedMissions.filter(m => m.status === "completed");
   const abandonedMissions = sortedMissions.filter(m => m.status === "abandoned");
 
-  const ganttMissions = missions.filter(m => m.status !== "completed");
+  const [ganttSortMode, setGanttSortMode] = useState("created_desc");
+  const ganttMissions = sortMissions(
+    missions.filter(m => m.status === "added" || m.status === "in_progress"),
+    ganttSortMode,
+    profile.priority_weights
+  );
 
   function runSearch() { setAppliedSearch(searchInput.trim()); }
   function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
   function toggleColumn(key) { setVisibleColumns(vc => ({ ...vc, [key]: !vc[key] })); }
+  function toggleSection(key) { setVisibleSections(vs => ({ ...vs, [key]: !vs[key] })); }
 
   return (
     <div className="min-h-screen">
@@ -1718,28 +1774,54 @@ function Dashboard({ session, profile, setProfile }) {
 
         {tab === "list" && (
           <div className="space-y-8">
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-              <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
-            </section>
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-              <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
-            </section>
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-              <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
-            </section>
+            {visibleSections.open && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
+                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+              </section>
+            )}
+            {visibleSections.completed && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
+                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+              </section>
+            )}
+            {visibleSections.abandoned && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
+                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+              </section>
+            )}
           </div>
         )}
 
+        {tab === "gantt" && (
+          <div className="bg-white rounded-2xl shadow p-4 mb-4 flex justify-end">
+            <div className="flex gap-1 text-xs flex-wrap">
+              <button onClick={() => setGanttSortMode("created_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+              <button onClick={() => setGanttSortMode("due_asc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+              <button onClick={() => setGanttSortMode("priority_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+              <button onClick={() => setGanttSortMode("scale_asc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+              <button onClick={() => setGanttSortMode("scale_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+            </div>
+          </div>
+        )}
         {tab === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
       {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} />}
       {showColumnSettings && (
-        <ColumnSettingsModal visibleColumns={visibleColumns} onToggle={toggleColumn} onClose={() => setShowColumnSettings(false)} />
+        <ColumnSettingsModal
+          visibleColumns={visibleColumns} onToggleColumn={toggleColumn}
+          visibleSections={visibleSections} onToggleSection={toggleSection}
+          onClose={() => setShowColumnSettings(false)}
+        />
       )}
       {openMissionId && (
         <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
