@@ -773,6 +773,16 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 
   useEffect(() => { load(); }, [load]);
 
+  // Realtime：這筆任務本身，或底下的回覆紀錄，只要有變動就重新整理詳情內容。
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("mission-detail-" + missionId)
+      .on("postgres_changes", { event: "*", schema: "public", table: "missions", filter: `id=eq.${missionId}` }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "mission_updates", filter: `mission_id=eq.${missionId}` }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [missionId, load]);
+
   if (!mission) return null;
 
   const isCreator = mission.creator_id === currentUser.id;
@@ -1647,6 +1657,18 @@ function Dashboard({ session, profile, setProfile }) {
   }, [profile.id]);
 
   useEffect(() => { loadMissions(); loadNotifs(); }, [loadMissions, loadNotifs]);
+
+  // Realtime：missions / mission_updates / friendships 任何一張表有變動，就重新抓一次任務列表。
+  // RLS 政策會自動幫每個使用者過濾掉他原本就看不到的變動，不用額外處理權限判斷。
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("dashboard-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "missions" }, () => loadMissions())
+      .on("postgres_changes", { event: "*", schema: "public", table: "mission_updates" }, () => loadMissions())
+      .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => loadMissions())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [loadMissions]);
 
   const markNotifsRead = useCallback(async () => {
     await sb.from("notifications").update({ is_read: true }).eq("user_id", profile.id).eq("is_read", false);
