@@ -235,6 +235,10 @@ table { border-collapse: collapse; width: 100%; }
 .w-7 { width: 1.75rem; }
 .h-7 { height: 1.75rem; }
 .w-72 { width: 18rem; }
+.w-8 { width: 2rem; }
+.w-9 { width: 2.25rem; }
+.h-9 { height: 2.25rem; }
+.shrink-0 { flex-shrink: 0; }
 .h-72 { height: 18rem; }
 .w-full { width: 100%; }
 .min-h-screen { min-height: 100vh; }
@@ -331,6 +335,40 @@ const STATUS_COLOR = {
   abandoned: "bg-rose-100 text-rose-700",
 };
 const STATUS_BAR_COLOR = { added: "#94a3b8", in_progress: "#3b82f6", completed: "#10b981", abandoned: "#f43f5e" };
+const TASK_LIST_COLUMNS = [
+  { key: "created_at", label: "建立時間" },
+  { key: "creator", label: "建立成員" },
+  { key: "updated_at", label: "最後更新" },
+  { key: "title", label: "任務標題" },
+  { key: "priority", label: "重要性" },
+  { key: "scale", label: "任務規模" },
+  { key: "urgency", label: "緊急度" },
+  { key: "due_date", label: "截止時間" },
+  { key: "status", label: "狀態" },
+];
+const DEFAULT_VISIBLE_COLUMNS = TASK_LIST_COLUMNS.reduce((acc, c) => { acc[c.key] = true; return acc; }, {});
+
+function ColumnSettingsModal({ visibleColumns, onToggle, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">顯示欄位設定</h2>
+          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+        <div className="space-y-2">
+          {TASK_LIST_COLUMNS.map(c => (
+            <label key={c.key} className="flex items-center gap-2 text-sm bg-slate-50 rounded-lg px-3 py-2">
+              <input type="checkbox" checked={!!visibleColumns[c.key]} onChange={() => onToggle(c.key)} className="w-4 h-4" />
+              {c.label}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 mt-3">勾選的欄位會顯示在任務列表；取消勾選則隱藏該欄位。</p>
+      </div>
+    </div>
+  );
+}
 const TYPE_LABEL = { private_mission: "私人任務", shared_mission: "分享任務" };
 const PERM_LABEL = { read_only: "唯讀", editable: "可編輯" };
 const PRIORITY_LEVELS = ["P1", "P2", "P3", "P4"];
@@ -391,6 +429,10 @@ function sortMissions(list, mode, weights) {
     });
   } else if (mode === "priority_desc") {
     arr.sort((a, b) => overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
+  } else if (mode === "scale_asc") {
+    arr.sort((a, b) => (a.scale || 1) - (b.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
+  } else if (mode === "scale_desc") {
+    arr.sort((a, b) => (b.scale || 1) - (a.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
   } else {
     arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
@@ -403,6 +445,7 @@ const Icon = {
   Plus: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M12 5v14M5 12h14"/></svg>),
   Close: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M18 6 6 18M6 6l12 12"/></svg>),
   Search: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>),
+  Settings: (p) => (<svg viewBox="28 74 155 149" fill="currentColor" {...p}><path d="m 130.29847,217.05188 c -6.64363,-1.74218 -11.95968,-6.3444 -14.46827,-12.52549 l -0.77173,-1.90152 -38.664439,-0.006 -38.664443,-0.006 -1.411111,-0.6628 c -1.65939,-0.77941 -2.167126,-1.2982 -2.941617,-3.00565 -1.0306,-2.27207 -0.545692,-4.77393 1.278447,-6.5961 1.848286,-1.84629 -1.148751,-1.71673 41.631678,-1.79978 l 38.839615,-0.0754 0.49153,-1.3357 c 1.85006,-5.02751 6.02561,-9.39411 11.25928,-11.77444 9.5675,-4.35141 20.84157,-0.59021 26.37075,8.79768 0.47405,0.80487 1.08751,2.09863 1.36326,2.87502 l 0.50137,1.41162 8.7595,0.0883 c 9.56528,0.0965 9.88345,0.14637 11.55157,1.8127 1.87839,1.87635 2.31802,4.35412 1.1963,6.74229 -0.77941,1.65939 -1.2982,2.16712 -3.00565,2.94162 -1.1814,0.53587 -1.8291,0.57417 -9.8082,0.57996 l -8.54327,0.006 -0.30975,0.77611 c -2.73186,6.8449 -7.08545,11.04379 -13.8646,13.37189 -2.51392,0.86333 -8.03092,1.00954 -10.79022,0.28596 z m 8.7953,-12.48578 c 6.71792,-3.20844 6.63871,-12.79508 -0.1331,-16.10807 -0.93133,-0.45564 -1.96816,-0.67882 -3.49337,-0.75197 -1.8792,-0.0901 -2.38819,-0.004 -3.81,0.6449 -2.13981,0.97656 -3.81324,2.64468 -4.75233,4.73726 -1.86085,4.14652 0.0361,9.43249 4.13552,11.52385 2.53133,1.29139 5.28601,1.27567 8.05328,-0.046 z M 72.584031,169.30874 c -7.002411,-0.82159 -13.17507,-5.17147 -16.20367,-11.41876 -0.678391,-1.39935 -1.306602,-2.76653 -1.396026,-3.03817 -0.150106,-0.45597 -0.829549,-0.49437 -8.849779,-0.50009 -9.749769,-0.007 -10.101652,-0.0681 -11.849216,-2.05845 -1.954053,-2.22555 -1.954053,-5.49849 0,-7.72404 1.747564,-1.99036 2.099447,-2.05149 11.849216,-2.05845 8.02023,-0.006 8.699673,-0.0441 8.849779,-0.50008 0.08942,-0.27164 0.717635,-1.63882 1.396026,-3.03818 2.635963,-5.43736 7.911286,-9.63179 13.880987,-11.03682 2.558659,-0.60221 7.024645,-0.58598 9.487154,0.0345 6.564125,1.65389 12.157485,6.5177 14.604894,12.69996 l 0.670351,1.69333 39.086253,0.14112 c 43.55066,0.15722 39.84574,-0.0288 41.71007,2.09453 1.91633,2.18258 1.91633,5.48168 0,7.66426 -1.86433,2.12336 1.84059,1.93731 -41.71007,2.09454 l -39.086253,0.14111 -0.670351,1.69333 c -3.435953,8.67936 -12.588025,14.19363 -21.769365,13.11638 z m 6.329038,-12.81154 c 6.591383,-3.22486 6.555633,-12.91548 -0.05963,-16.16399 -1.365381,-0.67049 -1.959037,-0.79086 -3.870519,-0.7848 -2.951106,0.009 -4.712125,0.7679 -6.614135,2.849 -3.146802,3.4431 -3.190424,8.52944 -0.102606,11.96384 2.027564,2.25514 4.193434,3.1566 7.199705,2.99662 1.328595,-0.0707 2.357759,-0.32766 3.447185,-0.86067 z m 53.643181,-35.33591 c -0.31044,-0.0611 -1.26294,-0.25061 -2.11667,-0.42107 -1.94345,-0.38803 -5.05448,-1.80286 -7.26488,-3.30391 -3.06668,-2.08254 -6.2592,-6.18517 -7.55657,-9.71076 l -0.49153,-1.33571 -38.839615,-0.0754 c -42.780429,-0.0831 -39.783392,0.0465 -41.631678,-1.79979 -1.824139,-1.82217 -2.309047,-4.32403 -1.278447,-6.596099 0.774491,-1.707449 1.282227,-2.226238 2.941617,-3.005652 l 1.411111,-0.662798 38.664443,-0.0062 38.664439,-0.0062 0.77173,-1.901523 c 2.58715,-6.37467 8.23979,-11.123762 15.04119,-12.636929 2.90991,-0.647395 7.69157,-0.459374 10.2173,0.401759 6.75849,2.304266 11.13214,6.521124 13.8646,13.367537 l 0.30975,0.776111 8.54327,0.0028 c 8.37428,0.0027 8.57119,0.01587 9.95438,0.665555 1.65939,0.779414 2.16713,1.298203 2.94162,3.005652 1.0306,2.272067 0.54569,4.773927 -1.27845,6.596097 -1.66887,1.66707 -1.98304,1.71624 -11.58542,1.81292 l -8.79336,0.0885 -0.18783,0.75813 c -0.30536,1.2325 -1.80631,4.03043 -3.05333,5.69173 -3.99442,5.32143 -10.36827,8.51025 -16.84878,8.42937 -1.00894,-0.0126 -2.08844,-0.0729 -2.39889,-0.13404 z m 6.40442,-12.75528 c 4.55043,-2.2315 6.4166,-7.54214 4.21899,-12.006126 -3.34945,-6.803693 -12.83721,-6.775501 -16.17552,0.04806 -0.45564,0.93133 -0.67882,1.968159 -0.75197,3.493367 -0.0902,1.879629 -0.004,2.387869 0.64533,3.810009 0.97338,2.13164 2.42727,3.62472 4.52986,4.65196 1.51649,0.7409 1.92912,0.81816 3.95111,0.73976 1.65172,-0.064 2.61329,-0.26188 3.5822,-0.73703 z"/></svg>),
 };
 
 // =====================================================================
@@ -424,7 +467,10 @@ function AuthScreen() {
         const { error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else if (mode === "register") {
-        const { error } = await sb.auth.signUp({ email, password });
+        const { error } = await sb.auth.signUp({
+          email, password,
+          options: { emailRedirectTo: window.location.href.split("#")[0] },
+        });
         if (error) throw error;
         setMsg({ type: "ok", text: "註冊成功！若專案有開啟信箱驗證，請收信確認後再登入。" });
       } else if (mode === "forgot") {
@@ -872,20 +918,23 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen, priorityLabels }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, visibleColumns }) {
+  const vc = visibleColumns || DEFAULT_VISIBLE_COLUMNS;
+  const colCount = TASK_LIST_COLUMNS.filter(c => vc[c.key]).length || 1;
   return (
     <div className="bg-white rounded-2xl shadow overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
-            <th className="px-4 py-2 font-medium">建立時間</th>
-            <th className="px-4 py-2 font-medium">建立成員</th>
-            <th className="px-4 py-2 font-medium">最後更新</th>
-            <th className="px-4 py-2 font-medium">任務標題</th>
-            <th className="px-4 py-2 font-medium">重要性</th>
-            <th className="px-4 py-2 font-medium">緊急度</th>
-            <th className="px-4 py-2 font-medium">截止時間</th>
-            <th className="px-4 py-2 font-medium">狀態</th>
+            {vc.created_at && <th className="px-4 py-2 font-medium">建立時間</th>}
+            {vc.creator && <th className="px-4 py-2 font-medium">建立成員</th>}
+            {vc.updated_at && <th className="px-4 py-2 font-medium">最後更新</th>}
+            {vc.title && <th className="px-4 py-2 font-medium">任務標題</th>}
+            {vc.priority && <th className="px-4 py-2 font-medium">重要性</th>}
+            {vc.scale && <th className="px-4 py-2 font-medium">任務規模</th>}
+            {vc.urgency && <th className="px-4 py-2 font-medium">緊急度</th>}
+            {vc.due_date && <th className="px-4 py-2 font-medium">截止時間</th>}
+            {vc.status && <th className="px-4 py-2 font-medium">狀態</th>}
           </tr>
         </thead>
         <tbody>
@@ -894,21 +943,24 @@ function MissionListView({ missions, onOpen, priorityLabels }) {
             const urgency = rd === null ? null : urgencyScore(rd, m.scale || 1);
             return (
               <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
-                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>
-                <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>
-                <td className="px-4 py-3 font-medium">{m.title}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{priorityLabel(priorityLabels, m.priority)}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{urgency === null ? "—" : urgency.toFixed(2)}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
-                </td>
+                {vc.created_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>}
+                {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
+                {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
+                {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
+                {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{priorityLabel(priorityLabels, m.priority)}</td>}
+                {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{scaleLabel(scaleLabels, m.scale || 1)}</td>}
+                {vc.urgency && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{urgency === null ? "—" : urgency.toFixed(2)}</td>}
+                {vc.due_date && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>}
+                {vc.status && (
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
+                  </td>
+                )}
               </tr>
             );
           })}
           {missions.length === 0 && (
-            <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">目前沒有符合條件的任務</td></tr>
+            <tr><td colSpan={colCount} className="px-4 py-8 text-center text-slate-400">目前沒有符合條件的任務</td></tr>
           )}
         </tbody>
       </table>
@@ -1370,58 +1422,64 @@ function SettingsView({ profile, onProfileChange }) {
       <div className="bg-white rounded-2xl shadow p-5 mb-4">
         <h3 className="font-bold mb-3">顯示設定</h3>
 
-        <div className="flex justify-between items-center mb-2">
-          <h4 className="text-sm font-semibold text-slate-700">重要性顯示</h4>
-          {!editingLabels && <button onClick={startEditLabels} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">可以把 P1～P4 換成你自己習慣的名稱（例如「最緊急」），任務列表跟已完成任務清單都會跟著換成你設定的文字。</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {PRIORITY_LEVELS.map(p => (
-            <div key={p}>
-              <label className="text-xs text-slate-500">{p}</label>
-              {editingLabels ? (
-                <input value={labelDraft[p] || ""} onChange={e => setLabelDraft({ ...labelDraft, [p]: e.target.value })}
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              ) : (
-                <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm">{priorityLabels[p] || p}</div>
-              )}
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">重要性顯示</h4>
+              {!editingLabels && <button onClick={startEditLabels} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
             </div>
-          ))}
-        </div>
-        {editingLabels && (
-          <div className="flex gap-2 mt-3">
-            <button onClick={saveLabels} disabled={savingLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingLabels ? "儲存中…" : "儲存"}</button>
-            <button onClick={() => setEditingLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
-          </div>
-        )}
-
-        <div className="flex justify-between items-center mb-2 mt-6 pt-4 border-t border-slate-100">
-          <h4 className="text-sm font-semibold text-slate-700">任務規模顯示</h4>
-          {!editingScaleLabels && <button onClick={startEditScaleLabels} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">可以把 S1～S5 換成你自己習慣的名稱（例如「小任務」）。規模會用來計算下方的緊急程度分數。</p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {SCALE_LEVELS.map(n => {
-            const key = "S" + n;
-            return (
-              <div key={key}>
-                <label className="text-xs text-slate-500">{key}</label>
-                {editingScaleLabels ? (
-                  <input value={scaleLabelDraft[key] || ""} onChange={e => setScaleLabelDraft({ ...scaleLabelDraft, [key]: e.target.value })}
-                    className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-                ) : (
-                  <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm">{scaleLabels[key] || key}</div>
-                )}
+            <p className="text-xs text-slate-500 mb-3">可以把 P1～P4 換成你自己習慣的名稱（例如「最緊急」），任務列表都會跟著換成你設定的文字。</p>
+            <div className="grid grid-cols-1 gap-2">
+              {PRIORITY_LEVELS.map(p => (
+                <div key={p} className="flex items-center gap-3">
+                  <label className="text-xs text-slate-500 w-8 shrink-0">{p}</label>
+                  {editingLabels ? (
+                    <input value={labelDraft[p] || ""} onChange={e => setLabelDraft({ ...labelDraft, [p]: e.target.value })}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                  ) : (
+                    <div className="flex-1 px-3 py-2 bg-white rounded-lg text-sm">{priorityLabels[p] || p}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {editingLabels && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveLabels} disabled={savingLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingLabels ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
               </div>
-            );
-          })}
-        </div>
-        {editingScaleLabels && (
-          <div className="flex gap-2 mt-3">
-            <button onClick={saveScaleLabels} disabled={savingScaleLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingScaleLabels ? "儲存中…" : "儲存"}</button>
-            <button onClick={() => setEditingScaleLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+            )}
           </div>
-        )}
+
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">任務規模顯示</h4>
+              {!editingScaleLabels && <button onClick={startEditScaleLabels} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+            </div>
+            <p className="text-xs text-slate-500 mb-3">可以把 S1～S5 換成你自己習慣的名稱（例如「小任務」）。規模會用來計算緊急程度分數。</p>
+            <div className="grid grid-cols-1 gap-2">
+              {SCALE_LEVELS.map(n => {
+                const key = "S" + n;
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <label className="text-xs text-slate-500 w-8 shrink-0">{key}</label>
+                    {editingScaleLabels ? (
+                      <input value={scaleLabelDraft[key] || ""} onChange={e => setScaleLabelDraft({ ...scaleLabelDraft, [key]: e.target.value })}
+                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                    ) : (
+                      <div className="flex-1 px-3 py-2 bg-white rounded-lg text-sm">{scaleLabels[key] || key}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {editingScaleLabels && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveScaleLabels} disabled={savingScaleLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingScaleLabels ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingScaleLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="mt-6 pt-4 border-t border-slate-100">
           <h4 className="text-sm font-semibold text-slate-700 mb-2">緊急程度分數曲線</h4>
@@ -1517,15 +1575,13 @@ function Dashboard({ session, profile, setProfile }) {
   const [missions, setMissions] = useState([]);
   const [openMissionId, setOpenMissionId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("all");
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc
-  const [doneSearchInput, setDoneSearchInput] = useState("");
-  const [doneAppliedSearch, setDoneAppliedSearch] = useState("");
-  const [doneSortMode, setDoneSortMode] = useState("created_desc");
+  const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc | priority_desc
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
@@ -1560,31 +1616,24 @@ function Dashboard({ session, profile, setProfile }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [notifOpen, markNotifsRead]);
 
-  const visibleMissions = tab === "done"
-    ? missions.filter(m => m.status === "completed")
-    : missions.filter(m => statusFilter === "all" ? m.status !== "completed" : m.status === statusFilter);
-
-  const searchedMissions = (tab === "list" && appliedSearch)
-    ? visibleMissions.filter(m => {
+  const searchedMissions = appliedSearch
+    ? missions.filter(m => {
         const q = appliedSearch.toLowerCase();
         return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
       })
-    : visibleMissions;
+    : missions;
 
-  const listMissions = tab === "list" ? sortMissions(searchedMissions, sortMode, profile.priority_weights) : searchedMissions;
+  const sortedMissions = sortMissions(searchedMissions, sortMode, profile.priority_weights);
 
-  const doneSearchedMissions = (tab === "done" && doneAppliedSearch)
-    ? visibleMissions.filter(m => {
-        const q = doneAppliedSearch.toLowerCase();
-        return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
-      })
-    : visibleMissions;
-  const doneMissions = tab === "done" ? sortMissions(doneSearchedMissions, doneSortMode, profile.priority_weights) : doneSearchedMissions;
+  const openMissions = sortedMissions.filter(m => m.status === "added" || m.status === "in_progress");
+  const completedMissions = sortedMissions.filter(m => m.status === "completed");
+  const abandonedMissions = sortedMissions.filter(m => m.status === "abandoned");
+
+  const ganttMissions = missions.filter(m => m.status !== "completed");
 
   function runSearch() { setAppliedSearch(searchInput.trim()); }
   function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
-  function runDoneSearch() { setDoneAppliedSearch(doneSearchInput.trim()); }
-  function clearDoneSearch() { setDoneSearchInput(""); setDoneAppliedSearch(""); }
+  function toggleColumn(key) { setVisibleColumns(vc => ({ ...vc, [key]: !vc[key] })); }
 
   return (
     <div className="min-h-screen">
@@ -1592,7 +1641,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","任務列表"],["gantt","甘特圖"],["done","已完成任務"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","任務列表"],["gantt","甘特圖"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -1621,15 +1670,12 @@ function Dashboard({ session, profile, setProfile }) {
 
       <main className="max-w-6xl mx-auto px-6 py-6">
         {tab !== "settings" && (
-          <div className="flex justify-between items-center mb-4">
-            {tab !== "done" ? (
-              <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white">
-                <option value="all">全部（未結案）</option>
-                <option value="added">已新增</option>
-                <option value="in_progress">進行中</option>
-                <option value="abandoned">已棄置</option>
-              </select>
-            ) : <div />}
+          <div className="flex justify-end items-center gap-2 mb-4">
+            {tab === "list" && (
+              <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                <Icon.Settings className="w-4 h-4 text-slate-600" />
+              </button>
+            )}
             <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
               <Icon.Plus className="w-4 h-4" />新增任務
             </button>
@@ -1650,59 +1696,51 @@ function Dashboard({ session, profile, setProfile }) {
             <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
               <p className="text-xs text-slate-500">
                 {appliedSearch
-                  ? `目前顯示是所有標題和內文含有「${appliedSearch}」的搜尋結果，共 ${listMissions.length} 筆`
-                  : `目前顯示全部任務，共 ${listMissions.length} 筆`}
+                  ? `目前顯示是所有標題和內文含有「${appliedSearch}」的搜尋結果，共 ${sortedMissions.length} 筆`
+                  : `目前顯示全部任務，共 ${sortedMissions.length} 筆`}
                 {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
               </p>
-              <div className="flex gap-1 text-xs">
+              <div className="flex gap-1 text-xs flex-wrap">
                 <button onClick={() => setSortMode("created_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
                 <button onClick={() => setSortMode("due_asc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
                 <button onClick={() => setSortMode("priority_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+                <button onClick={() => setSortMode("scale_asc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+                <button onClick={() => setSortMode("scale_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
               </div>
             </div>
           </div>
         )}
 
-        {tab === "done" && (
-          <div className="bg-white rounded-2xl shadow p-4 mb-4">
-            <div className="flex gap-2">
-              <input value={doneSearchInput} onChange={e => setDoneSearchInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && runDoneSearch()}
-                placeholder="搜尋已完成任務標題或內文…"
-                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              <button onClick={runDoneSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
-                <Icon.Search className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
-              <p className="text-xs text-slate-500">
-                {doneAppliedSearch
-                  ? `目前顯示是所有標題和內文含有「${doneAppliedSearch}」的搜尋結果，共 ${doneMissions.length} 筆`
-                  : `目前顯示全部已完成任務，共 ${doneMissions.length} 筆`}
-                {doneAppliedSearch && <button onClick={clearDoneSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
-              </p>
-              <div className="flex gap-1 text-xs">
-                <button onClick={() => setDoneSortMode("created_desc")}
-                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-                <button onClick={() => setDoneSortMode("due_asc")}
-                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-                <button onClick={() => setDoneSortMode("priority_desc")}
-                  className={"px-3 py-1.5 rounded-lg " + (doneSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-              </div>
-            </div>
+        {tab === "list" && (
+          <div className="space-y-8">
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
+              <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+            </section>
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
+              <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+            </section>
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
+              <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+            </section>
           </div>
         )}
 
-        {tab === "list" && <MissionListView missions={listMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} />}
-        {tab === "gantt" && <GanttView missions={visibleMissions} onOpen={setOpenMissionId} />}
-        {tab === "done" && <MissionListView missions={doneMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} />}
+        {tab === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
       {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} />}
+      {showColumnSettings && (
+        <ColumnSettingsModal visibleColumns={visibleColumns} onToggle={toggleColumn} onClose={() => setShowColumnSettings(false)} />
+      )}
       {openMissionId && (
         <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
