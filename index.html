@@ -339,6 +339,7 @@ const TASK_LIST_COLUMNS = [
   { key: "created_at", label: "建立時間" },
   { key: "creator", label: "建立成員" },
   { key: "updated_at", label: "最後更新" },
+  { key: "procrastination_days", label: "拖延天數" },
   { key: "title", label: "任務標題" },
   { key: "priority", label: "重要性" },
   { key: "scale", label: "任務規模" },
@@ -520,6 +521,17 @@ function remainingDays(dueDate) {
   return (new Date(dueDate).getTime() - Date.now()) / 86400000;
 }
 
+// 拖延天數：距離上次更新過了多久（天，帶小數）
+function procrastinationDays(m) {
+  return (Date.now() - new Date(m.updated_at).getTime()) / 86400000;
+}
+// 拖延優先排序的第一層級：已新增 > 進行中 > 其他（已完成/已棄置在此排序模式下不會用到這個層級）
+function procrastinationTier(status) {
+  if (status === "added") return 0;
+  if (status === "in_progress") return 1;
+  return 2;
+}
+
 const PRIORITY_SCORE_MAP = { P1: 1, P2: 2, P3: 3, P4: 4 };
 const DEFAULT_PRIORITY_WEIGHTS = { w1: 1, w2: 1 };
 function priorityImportanceScore(p) { return PRIORITY_SCORE_MAP[p] || 2; }
@@ -558,6 +570,8 @@ function sortMissions(list, mode, weights) {
     arr.sort((a, b) => (a.scale || 1) - (b.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
   } else if (mode === "scale_desc") {
     arr.sort((a, b) => (b.scale || 1) - (a.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
+  } else if (mode === "procrastination_desc") {
+    arr.sort((a, b) => procrastinationTier(a.status) - procrastinationTier(b.status) || procrastinationDays(b) - procrastinationDays(a));
   } else {
     arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
@@ -1088,6 +1102,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
             {vc.created_at && <th className="px-4 py-2 font-medium">建立時間</th>}
             {vc.creator && <th className="px-4 py-2 font-medium">建立成員</th>}
             {vc.updated_at && <th className="px-4 py-2 font-medium">最後更新</th>}
+            {vc.procrastination_days && <th className="px-4 py-2 font-medium">拖延天數</th>}
             {vc.title && <th className="px-4 py-2 font-medium">任務標題</th>}
             {vc.priority && <th className="px-4 py-2 font-medium">重要性</th>}
             {vc.scale && <th className="px-4 py-2 font-medium">任務規模</th>}
@@ -1108,6 +1123,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
                 {vc.created_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>}
                 {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
                 {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
+                {vc.procrastination_days && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{procrastinationDays(m).toFixed(1)}天</td>}
                 {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
                 {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride)}</td>}
                 {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride)}</td>}
@@ -2159,6 +2175,8 @@ function Dashboard({ session, profile, setProfile }) {
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
                 <button onClick={() => setSortMode("scale_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+                <button onClick={() => setSortMode("procrastination_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
               </div>
             </div>
           </div>
@@ -2207,6 +2225,8 @@ function Dashboard({ session, profile, setProfile }) {
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
               <button onClick={() => setGanttSortMode("scale_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+              <button onClick={() => setGanttSortMode("procrastination_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
             </div>
           </div>
         )}
