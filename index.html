@@ -1381,6 +1381,11 @@ function ChangePasswordCard({ email }) {
 function SettingsView({ profile, onProfileChange }) {
   const [displayName, setDisplayName] = useState(profile.display_name);
   const [isSearchable, setIsSearchable] = useState(profile.is_searchable);
+  useEffect(() => {
+    setDisplayName(profile.display_name);
+    setIsSearchable(profile.is_searchable);
+  }, [profile.display_name, profile.is_searchable]);
+
   const [saving, setSaving] = useState(false);
   const [friends, setFriends] = useState([]);
   const [incoming, setIncoming] = useState([]);
@@ -1388,13 +1393,16 @@ function SettingsView({ profile, onProfileChange }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [msg, setMsg] = useState(null);
-  const [priorityLabels, setPriorityLabels] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
-  const [priorityDisplay, setPriorityDisplay] = useState(profile.priority_display || DEFAULT_DISPLAY_MODES);
-  const [priorityColorOverride, setPriorityColorOverride] = useState(profile.priority_color_override || false);
+
+  // 以下這些「已儲存的值」都直接從 profile 讀取（而不是自己另外存一份 state），
+  // 這樣只要 profile 因為 Realtime 從別的裝置同步更新，畫面就會自動跟著換，不用重新整理
+  const priorityLabels = profile.priority_labels || DEFAULT_PRIORITY_LABELS;
+  const priorityDisplay = profile.priority_display || DEFAULT_DISPLAY_MODES;
+  const priorityColorOverride = profile.priority_color_override || false;
   const [editingPriority, setEditingPriority] = useState(false);
-  const [priorityLabelDraft, setPriorityLabelDraft] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
-  const [priorityDisplayDraft, setPriorityDisplayDraft] = useState(profile.priority_display || DEFAULT_DISPLAY_MODES);
-  const [priorityColorOverrideDraft, setPriorityColorOverrideDraft] = useState(profile.priority_color_override || false);
+  const [priorityLabelDraft, setPriorityLabelDraft] = useState(priorityLabels);
+  const [priorityDisplayDraft, setPriorityDisplayDraft] = useState(priorityDisplay);
+  const [priorityColorOverrideDraft, setPriorityColorOverrideDraft] = useState(priorityColorOverride);
   const [savingPriority, setSavingPriority] = useState(false);
 
   function startEditPriority() {
@@ -1414,9 +1422,6 @@ function SettingsView({ profile, onProfileChange }) {
     }).eq("id", profile.id);
     setSavingPriority(false);
     if (!error) {
-      setPriorityLabels(priorityLabelDraft);
-      setPriorityDisplay(priorityDisplayDraft);
-      setPriorityColorOverride(priorityColorOverrideDraft);
       onProfileChange({ ...profile, priority_labels: priorityLabelDraft, priority_display: priorityDisplayDraft, priority_color_override: priorityColorOverrideDraft });
       setEditingPriority(false);
     } else {
@@ -1424,13 +1429,13 @@ function SettingsView({ profile, onProfileChange }) {
     }
   }
 
-  const [scaleLabels, setScaleLabels] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
-  const [scaleDisplay, setScaleDisplay] = useState(profile.scale_display || DEFAULT_DISPLAY_MODES);
-  const [scaleColorOverride, setScaleColorOverride] = useState(profile.scale_color_override || false);
+  const scaleLabels = profile.scale_labels || DEFAULT_SCALE_LABELS;
+  const scaleDisplay = profile.scale_display || DEFAULT_DISPLAY_MODES;
+  const scaleColorOverride = profile.scale_color_override || false;
   const [editingScale, setEditingScale] = useState(false);
-  const [scaleLabelDraft, setScaleLabelDraft] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
-  const [scaleDisplayDraft, setScaleDisplayDraft] = useState(profile.scale_display || DEFAULT_DISPLAY_MODES);
-  const [scaleColorOverrideDraft, setScaleColorOverrideDraft] = useState(profile.scale_color_override || false);
+  const [scaleLabelDraft, setScaleLabelDraft] = useState(scaleLabels);
+  const [scaleDisplayDraft, setScaleDisplayDraft] = useState(scaleDisplay);
+  const [scaleColorOverrideDraft, setScaleColorOverrideDraft] = useState(scaleColorOverride);
   const [savingScale, setSavingScale] = useState(false);
 
   function startEditScale() {
@@ -1450,9 +1455,6 @@ function SettingsView({ profile, onProfileChange }) {
     }).eq("id", profile.id);
     setSavingScale(false);
     if (!error) {
-      setScaleLabels(scaleLabelDraft);
-      setScaleDisplay(scaleDisplayDraft);
-      setScaleColorOverride(scaleColorOverrideDraft);
       onProfileChange({ ...profile, scale_labels: scaleLabelDraft, scale_display: scaleDisplayDraft, scale_color_override: scaleColorOverrideDraft });
       setEditingScale(false);
     } else {
@@ -1460,13 +1462,13 @@ function SettingsView({ profile, onProfileChange }) {
     }
   }
 
-  const [urgencyLabels, setUrgencyLabels] = useState(profile.urgency_labels || DEFAULT_URGENCY_LABELS);
-  const [urgencyDisplay, setUrgencyDisplay] = useState(profile.urgency_display || DEFAULT_URGENCY_DISPLAY);
-  const [urgencyColorOverride, setUrgencyColorOverride] = useState(profile.urgency_color_override || false);
+  const urgencyLabels = profile.urgency_labels || DEFAULT_URGENCY_LABELS;
+  const urgencyDisplay = profile.urgency_display || DEFAULT_URGENCY_DISPLAY;
+  const urgencyColorOverride = profile.urgency_color_override || false;
   const [editingUrgency, setEditingUrgency] = useState(false);
-  const [urgencyLabelDraft, setUrgencyLabelDraft] = useState(profile.urgency_labels || DEFAULT_URGENCY_LABELS);
-  const [urgencyDisplayDraft, setUrgencyDisplayDraft] = useState(profile.urgency_display || DEFAULT_URGENCY_DISPLAY);
-  const [urgencyColorOverrideDraft, setUrgencyColorOverrideDraft] = useState(profile.urgency_color_override || false);
+  const [urgencyLabelDraft, setUrgencyLabelDraft] = useState(urgencyLabels);
+  const [urgencyDisplayDraft, setUrgencyDisplayDraft] = useState(urgencyDisplay);
+  const [urgencyColorOverrideDraft, setUrgencyColorOverrideDraft] = useState(urgencyColorOverride);
   const [savingUrgency, setSavingUrgency] = useState(false);
 
   function startEditUrgency() {
@@ -1486,9 +1488,6 @@ function SettingsView({ profile, onProfileChange }) {
     }).eq("id", profile.id);
     setSavingUrgency(false);
     if (!error) {
-      setUrgencyLabels(urgencyLabelDraft);
-      setUrgencyDisplay(urgencyDisplayDraft);
-      setUrgencyColorOverride(urgencyColorOverrideDraft);
       onProfileChange({ ...profile, urgency_labels: urgencyLabelDraft, urgency_display: urgencyDisplayDraft, urgency_color_override: urgencyColorOverrideDraft });
       setEditingUrgency(false);
     } else {
@@ -1496,9 +1495,9 @@ function SettingsView({ profile, onProfileChange }) {
     }
   }
 
-  const [weights, setWeights] = useState(profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS);
+  const weights = profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS;
   const [editingWeights, setEditingWeights] = useState(false);
-  const [weightDraft, setWeightDraft] = useState({ w1: String((profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS).w1), w2: String((profile.priority_weights || DEFAULT_PRIORITY_WEIGHTS).w2) });
+  const [weightDraft, setWeightDraft] = useState({ w1: String(weights.w1), w2: String(weights.w2) });
   const [savingWeights, setSavingWeights] = useState(false);
   const [weightErr, setWeightErr] = useState(null);
 
@@ -1527,7 +1526,6 @@ function SettingsView({ profile, onProfileChange }) {
     const { error } = await sb.from("profiles").update({ priority_weights: newWeights }).eq("id", profile.id);
     setSavingWeights(false);
     if (!error) {
-      setWeights(newWeights);
       onProfileChange({ ...profile, priority_weights: newWeights });
       setEditingWeights(false);
     } else {
@@ -1540,7 +1538,6 @@ function SettingsView({ profile, onProfileChange }) {
     const { error } = await sb.from("profiles").update({ priority_weights: DEFAULT_PRIORITY_WEIGHTS }).eq("id", profile.id);
     setSavingWeights(false);
     if (!error) {
-      setWeights(DEFAULT_PRIORITY_WEIGHTS);
       onProfileChange({ ...profile, priority_weights: DEFAULT_PRIORITY_WEIGHTS });
       setEditingWeights(false);
       setWeightErr(null);
