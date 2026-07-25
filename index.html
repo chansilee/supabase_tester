@@ -2019,9 +2019,16 @@ function Dashboard({ session, profile, setProfile }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_updates" }, () => loadMissions())
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => loadMissions())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_hides" }, () => loadHiddenIds())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${profile.id}` }, (payload) => {
+        // 自己的 profiles 資料列在別的裝置被改動時（例如顯示欄位/區塊設定），同步更新這台裝置的畫面
+        const updated = payload.new;
+        setProfile(p => ({ ...p, ...updated }));
+        if (updated.visible_columns) setVisibleColumns({ ...DEFAULT_VISIBLE_COLUMNS, ...updated.visible_columns });
+        if (updated.visible_sections) setVisibleSections({ ...DEFAULT_VISIBLE_SECTIONS, ...updated.visible_sections });
+      })
       .subscribe();
     return () => { sb.removeChannel(channel); };
-  }, [loadMissions, loadHiddenIds]);
+  }, [loadMissions, loadHiddenIds, profile.id, setProfile]);
 
   const markNotifsRead = useCallback(async () => {
     await sb.from("notifications").update({ is_read: true }).eq("user_id", profile.id).eq("is_read", false);
