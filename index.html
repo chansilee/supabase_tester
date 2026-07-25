@@ -397,16 +397,114 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleSections, 
 const TYPE_LABEL = { private_mission: "私人任務", shared_mission: "分享任務" };
 const PERM_LABEL = { read_only: "唯讀", editable: "可編輯" };
 const PRIORITY_LEVELS = ["P1", "P2", "P3", "P4"];
-const DEFAULT_PRIORITY_LABELS = { P1: "P1", P2: "P2", P3: "P3", P4: "P4" };
-function priorityLabel(labels, p) {
-  return (labels && labels[p]) || DEFAULT_PRIORITY_LABELS[p] || p;
-}
+const DEFAULT_PRIORITY_LABELS = {
+  P1: { long: "P1", short: "P1" }, P2: { long: "P2", short: "P2" },
+  P3: { long: "P3", short: "P3" }, P4: { long: "P4", short: "P4" },
+};
 
 const SCALE_LEVELS = [1, 2, 3, 4, 5]; // 對應 S1~S5
-const DEFAULT_SCALE_LABELS = { S1: "S1", S2: "S2", S3: "S3", S4: "S4", S5: "S5" };
-function scaleLabel(labels, n) {
+const DEFAULT_SCALE_LABELS = {
+  S1: { long: "S1", short: "S1" }, S2: { long: "S2", short: "S2" }, S3: { long: "S3", short: "S3" },
+  S4: { long: "S4", short: "S4" }, S5: { long: "S5", short: "S5" },
+};
+
+// 顯示情境：任務內頁閱讀 / 任務內頁編輯 / 任務列表
+const DISPLAY_CONTEXTS = [
+  { key: "detail_view", label: "任務內顯示(閱讀)" },
+  { key: "detail_edit", label: "任務內顯示(編輯)" },
+  { key: "list", label: "任務列表內顯示" },
+];
+const DISPLAY_MODE_OPTIONS = [
+  { key: "long", label: "長字串" },
+  { key: "short", label: "短字串" },
+  { key: "score", label: "原始分數" },
+];
+const DEFAULT_DISPLAY_MODES = { detail_view: "long", detail_edit: "long", list: "long" };
+
+const URGENCY_LEVELS = ["U1", "U2", "U3", "U4"];
+const URGENCY_LEVEL_RANGES = { U1: [0, 0.5], U2: [0.5, 1.0], U3: [1.0, 1.5], U4: [1.5, 2.0] };
+const DEFAULT_URGENCY_LABELS = {
+  U1: { long: "U1", short: "U1" }, U2: { long: "U2", short: "U2" },
+  U3: { long: "U3", short: "U3" }, U4: { long: "U4", short: "U4" },
+};
+const URGENCY_CONTEXTS = [
+  { key: "detail_view", label: "任務內顯示(閱讀)" },
+  { key: "list", label: "任務列表內顯示" },
+];
+const URGENCY_MODE_OPTIONS = [
+  { key: "long", label: "長字串" },
+  { key: "short", label: "短字串" },
+  { key: "score", label: "原始分數" },
+];
+const DEFAULT_URGENCY_DISPLAY = { detail_view: "score", list: "score" };
+
+// 依「顯示情境」與使用者自訂文字，決定重要性/規模要顯示長字串、短字串、還是原始分數
+function resolvePriorityDisplay(labels, displayModes, context, p) {
+  const mode = (displayModes && displayModes[context]) || "long";
+  if (mode === "score") return String(priorityImportanceScore(p));
+  const entry = (labels && labels[p]) || DEFAULT_PRIORITY_LABELS[p];
+  return (entry && entry[mode]) || p;
+}
+function resolveScaleDisplay(labels, displayModes, context, n) {
+  const mode = (displayModes && displayModes[context]) || "long";
   const key = "S" + n;
-  return (labels && labels[key]) || DEFAULT_SCALE_LABELS[key] || key;
+  if (mode === "score") return String(n);
+  const entry = (labels && labels[key]) || DEFAULT_SCALE_LABELS[key];
+  return (entry && entry[mode]) || key;
+}
+
+// 緊急度顏色：0 分＝青綠、1 分＝琥珀橘、2 分＝珊瑚紅，中間線性插值
+const URGENCY_COLOR_STOPS = [
+  { t: 0, c: [47, 175, 155] },
+  { t: 1, c: [232, 163, 61] },
+  { t: 2, c: [232, 84, 74] },
+];
+function urgencyColor(score) {
+  const s = Math.max(0, Math.min(2, score));
+  const [lo, hi] = s <= 1 ? [URGENCY_COLOR_STOPS[0], URGENCY_COLOR_STOPS[1]] : [URGENCY_COLOR_STOPS[1], URGENCY_COLOR_STOPS[2]];
+  const localT = (s - lo.t) / (hi.t - lo.t || 1);
+  const r = Math.round(lo.c[0] + (hi.c[0] - lo.c[0]) * localT);
+  const g = Math.round(lo.c[1] + (hi.c[1] - lo.c[1]) * localT);
+  const b = Math.round(lo.c[2] + (hi.c[2] - lo.c[2]) * localT);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// 把 0~2 分的緊急度分數對應到 U1~U4 四個級距
+function urgencyBucket(score) {
+  const s = Math.max(0, Math.min(2, score));
+  if (s < 0.5) return "U1";
+  if (s < 1.0) return "U2";
+  if (s < 1.5) return "U3";
+  return "U4";
+}
+function resolveUrgencyDisplay(labels, displayModes, context, score) {
+  if (score === null) return "—";
+  const mode = (displayModes && displayModes[context]) || "score";
+  if (mode === "score") return score.toFixed(2);
+  const bucket = urgencyBucket(score);
+  const entry = (labels && labels[bucket]) || DEFAULT_URGENCY_LABELS[bucket];
+  return (entry && entry[mode]) || bucket;
+}
+function renderUrgencyText(labels, displayModes, context, score, colorOverride) {
+  const text = resolveUrgencyDisplay(labels, displayModes, context, score);
+  if (!colorOverride || score === null) return text;
+  return <span style={{ color: urgencyColor(score) }}>{text}</span>;
+}
+
+// 通用：把任意範圍的分數換算成 0~2 分再套用同一組緊急度色階（最低分＝綠，最高分＝紅）
+function scoreToColor(value, min, max) {
+  const t = max === min ? 0 : (value - min) / (max - min);
+  return urgencyColor(t * 2);
+}
+function renderPriorityText(labels, displayModes, context, p, colorOverride) {
+  const text = resolvePriorityDisplay(labels, displayModes, context, p);
+  if (!colorOverride) return text;
+  return <span style={{ color: scoreToColor(priorityImportanceScore(p), 1, 4) }}>{text}</span>;
+}
+function renderScaleText(labels, displayModes, context, n, colorOverride) {
+  const text = resolveScaleDisplay(labels, displayModes, context, n);
+  if (!colorOverride) return text;
+  return <span style={{ color: scoreToColor(n, 1, 5) }}>{text}</span>;
 }
 
 // 緊急程度分數：依剩餘天數 x 與規模 s 計算（規格見 urgency-score-spec.md）
@@ -624,7 +722,7 @@ function ResetPasswordScreen({ onDone }) {
 // =====================================================================
 // 新增任務 Modal
 // =====================================================================
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -681,7 +779,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels }) {
               {PRIORITY_LEVELS.map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
                   className={"flex-1 py-2 rounded-lg text-sm font-medium " + (priority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
-                  {priorityLabel(priorityLabels, p)}
+                  {renderPriorityText(priorityLabels, priorityDisplay, "detail_edit", p, priorityColorOverride)}
                 </button>
               ))}
             </div>
@@ -692,7 +790,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels }) {
               {SCALE_LEVELS.map(n => (
                 <button key={n} type="button" onClick={() => setScale(n)}
                   className={"flex-1 py-2 rounded-lg text-sm font-medium " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
-                  {scaleLabel(scaleLabels, n)}
+                  {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                 </button>
               ))}
             </div>
@@ -735,7 +833,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels }) {
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [replyText, setReplyText] = useState("");
@@ -853,9 +951,9 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div>建立時間：{fmt(mission.created_at)}</div>
               <div>最後更新：{fmt(mission.updated_at)}</div>
               <div>截止時間：{fmt(mission.due_date)}</div>
-              <div>重要性：{priorityLabel(priorityLabels, mission.priority)}</div>
-              <div>任務規模：{scaleLabel(scaleLabels, mission.scale)}</div>
-              <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); return rd === null ? "—" : urgencyScore(rd, mission.scale || 1).toFixed(2); })()}</div>
+              <div>重要性：{renderPriorityText(priorityLabels, priorityDisplay, "detail_view", mission.priority, priorityColorOverride)}</div>
+              <div>任務規模：{renderScaleText(scaleLabels, scaleDisplay, "detail_view", mission.scale, scaleColorOverride)}</div>
+              <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); const u = rd === null ? null : urgencyScore(rd, mission.scale || 1); return renderUrgencyText(urgencyLabels, urgencyDisplay, "detail_view", u, urgencyColorOverride); })()}</div>
             </div>
             {isCreator && mission.status !== "completed" && mission.status !== "abandoned" && (
               <button onClick={() => setEditingBody(true)} className="text-xs text-blue-600 underline mb-2">編輯本文</button>
@@ -871,7 +969,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 {PRIORITY_LEVELS.map(p => (
                   <button key={p} type="button" onClick={() => setEditPriority(p)}
                     className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editPriority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
-                    {priorityLabel(priorityLabels, p)}
+                    {renderPriorityText(priorityLabels, priorityDisplay, "detail_edit", p, priorityColorOverride)}
                   </button>
                 ))}
               </div>
@@ -882,7 +980,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 {SCALE_LEVELS.map(n => (
                   <button key={n} type="button" onClick={() => setEditScale(n)}
                     className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
-                    {scaleLabel(scaleLabels, n)}
+                    {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                   </button>
                 ))}
               </div>
@@ -977,7 +1075,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, visibleColumns }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns }) {
   const vc = visibleColumns || DEFAULT_VISIBLE_COLUMNS;
   const colCount = TASK_LIST_COLUMNS.filter(c => vc[c.key]).length || 1;
   return (
@@ -1006,9 +1104,9 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, visibl
                 {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
                 {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
                 {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
-                {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{priorityLabel(priorityLabels, m.priority)}</td>}
-                {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{scaleLabel(scaleLabels, m.scale || 1)}</td>}
-                {vc.urgency && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{urgency === null ? "—" : urgency.toFixed(2)}</td>}
+                {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride)}</td>}
+                {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride)}</td>}
+                {vc.urgency && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride)}</td>}
                 {vc.due_date && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>}
                 {vc.status && (
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -1152,7 +1250,7 @@ function UrgencyCurveChart({ scaleLabels }) {
         {SCALE_LEVELS.map(n => (
           <button key={n} onClick={() => setS(n)}
             className={"text-xs px-3 py-1.5 rounded-lg " + (s === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
-            {scaleLabel(scaleLabels, n)}
+            {scaleLabels["S" + n] || ("S" + n)}
           </button>
         ))}
       </div>
@@ -1277,40 +1375,108 @@ function SettingsView({ profile, onProfileChange }) {
   const [searchResults, setSearchResults] = useState([]);
   const [msg, setMsg] = useState(null);
   const [priorityLabels, setPriorityLabels] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
-  const [editingLabels, setEditingLabels] = useState(false);
-  const [labelDraft, setLabelDraft] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
-  const [savingLabels, setSavingLabels] = useState(false);
+  const [priorityDisplay, setPriorityDisplay] = useState(profile.priority_display || DEFAULT_DISPLAY_MODES);
+  const [priorityColorOverride, setPriorityColorOverride] = useState(profile.priority_color_override || false);
+  const [editingPriority, setEditingPriority] = useState(false);
+  const [priorityLabelDraft, setPriorityLabelDraft] = useState(profile.priority_labels || DEFAULT_PRIORITY_LABELS);
+  const [priorityDisplayDraft, setPriorityDisplayDraft] = useState(profile.priority_display || DEFAULT_DISPLAY_MODES);
+  const [priorityColorOverrideDraft, setPriorityColorOverrideDraft] = useState(profile.priority_color_override || false);
+  const [savingPriority, setSavingPriority] = useState(false);
 
-  function startEditLabels() { setLabelDraft(priorityLabels); setEditingLabels(true); }
-
-  async function saveLabels() {
-    setSavingLabels(true);
-    const { error } = await sb.from("profiles").update({ priority_labels: labelDraft }).eq("id", profile.id);
-    setSavingLabels(false);
+  function startEditPriority() {
+    setPriorityLabelDraft(priorityLabels);
+    setPriorityDisplayDraft(priorityDisplay);
+    setPriorityColorOverrideDraft(priorityColorOverride);
+    setEditingPriority(true);
+  }
+  function updatePriorityDraft(p, field, value) {
+    setPriorityLabelDraft(d => ({ ...d, [p]: { ...(d[p] || {}), [field]: value } }));
+  }
+  async function savePriority() {
+    setSavingPriority(true);
+    const { error } = await sb.from("profiles").update({
+      priority_labels: priorityLabelDraft, priority_display: priorityDisplayDraft,
+      priority_color_override: priorityColorOverrideDraft,
+    }).eq("id", profile.id);
+    setSavingPriority(false);
     if (!error) {
-      setPriorityLabels(labelDraft);
-      onProfileChange({ ...profile, priority_labels: labelDraft });
-      setEditingLabels(false);
+      setPriorityLabels(priorityLabelDraft);
+      setPriorityDisplay(priorityDisplayDraft);
+      setPriorityColorOverride(priorityColorOverrideDraft);
+      onProfileChange({ ...profile, priority_labels: priorityLabelDraft, priority_display: priorityDisplayDraft, priority_color_override: priorityColorOverrideDraft });
+      setEditingPriority(false);
     } else {
       setMsg({ type: "err", text: error.message });
     }
   }
 
   const [scaleLabels, setScaleLabels] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
-  const [editingScaleLabels, setEditingScaleLabels] = useState(false);
+  const [scaleDisplay, setScaleDisplay] = useState(profile.scale_display || DEFAULT_DISPLAY_MODES);
+  const [scaleColorOverride, setScaleColorOverride] = useState(profile.scale_color_override || false);
+  const [editingScale, setEditingScale] = useState(false);
   const [scaleLabelDraft, setScaleLabelDraft] = useState(profile.scale_labels || DEFAULT_SCALE_LABELS);
-  const [savingScaleLabels, setSavingScaleLabels] = useState(false);
+  const [scaleDisplayDraft, setScaleDisplayDraft] = useState(profile.scale_display || DEFAULT_DISPLAY_MODES);
+  const [scaleColorOverrideDraft, setScaleColorOverrideDraft] = useState(profile.scale_color_override || false);
+  const [savingScale, setSavingScale] = useState(false);
 
-  function startEditScaleLabels() { setScaleLabelDraft(scaleLabels); setEditingScaleLabels(true); }
-
-  async function saveScaleLabels() {
-    setSavingScaleLabels(true);
-    const { error } = await sb.from("profiles").update({ scale_labels: scaleLabelDraft }).eq("id", profile.id);
-    setSavingScaleLabels(false);
+  function startEditScale() {
+    setScaleLabelDraft(scaleLabels);
+    setScaleDisplayDraft(scaleDisplay);
+    setScaleColorOverrideDraft(scaleColorOverride);
+    setEditingScale(true);
+  }
+  function updateScaleDraft(key, field, value) {
+    setScaleLabelDraft(d => ({ ...d, [key]: { ...(d[key] || {}), [field]: value } }));
+  }
+  async function saveScale() {
+    setSavingScale(true);
+    const { error } = await sb.from("profiles").update({
+      scale_labels: scaleLabelDraft, scale_display: scaleDisplayDraft,
+      scale_color_override: scaleColorOverrideDraft,
+    }).eq("id", profile.id);
+    setSavingScale(false);
     if (!error) {
       setScaleLabels(scaleLabelDraft);
-      onProfileChange({ ...profile, scale_labels: scaleLabelDraft });
-      setEditingScaleLabels(false);
+      setScaleDisplay(scaleDisplayDraft);
+      setScaleColorOverride(scaleColorOverrideDraft);
+      onProfileChange({ ...profile, scale_labels: scaleLabelDraft, scale_display: scaleDisplayDraft, scale_color_override: scaleColorOverrideDraft });
+      setEditingScale(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+
+  const [urgencyLabels, setUrgencyLabels] = useState(profile.urgency_labels || DEFAULT_URGENCY_LABELS);
+  const [urgencyDisplay, setUrgencyDisplay] = useState(profile.urgency_display || DEFAULT_URGENCY_DISPLAY);
+  const [urgencyColorOverride, setUrgencyColorOverride] = useState(profile.urgency_color_override || false);
+  const [editingUrgency, setEditingUrgency] = useState(false);
+  const [urgencyLabelDraft, setUrgencyLabelDraft] = useState(profile.urgency_labels || DEFAULT_URGENCY_LABELS);
+  const [urgencyDisplayDraft, setUrgencyDisplayDraft] = useState(profile.urgency_display || DEFAULT_URGENCY_DISPLAY);
+  const [urgencyColorOverrideDraft, setUrgencyColorOverrideDraft] = useState(profile.urgency_color_override || false);
+  const [savingUrgency, setSavingUrgency] = useState(false);
+
+  function startEditUrgency() {
+    setUrgencyLabelDraft(urgencyLabels);
+    setUrgencyDisplayDraft(urgencyDisplay);
+    setUrgencyColorOverrideDraft(urgencyColorOverride);
+    setEditingUrgency(true);
+  }
+  function updateUrgencyDraft(u, field, value) {
+    setUrgencyLabelDraft(d => ({ ...d, [u]: { ...(d[u] || {}), [field]: value } }));
+  }
+  async function saveUrgency() {
+    setSavingUrgency(true);
+    const { error } = await sb.from("profiles").update({
+      urgency_labels: urgencyLabelDraft, urgency_display: urgencyDisplayDraft,
+      urgency_color_override: urgencyColorOverrideDraft,
+    }).eq("id", profile.id);
+    setSavingUrgency(false);
+    if (!error) {
+      setUrgencyLabels(urgencyLabelDraft);
+      setUrgencyDisplay(urgencyDisplayDraft);
+      setUrgencyColorOverride(urgencyColorOverrideDraft);
+      onProfileChange({ ...profile, urgency_labels: urgencyLabelDraft, urgency_display: urgencyDisplayDraft, urgency_color_override: urgencyColorOverrideDraft });
+      setEditingUrgency(false);
     } else {
       setMsg({ type: "err", text: error.message });
     }
@@ -1485,26 +1651,65 @@ function SettingsView({ profile, onProfileChange }) {
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="flex justify-between items-center mb-2">
               <h4 className="text-sm font-semibold text-slate-700">重要性顯示</h4>
-              {!editingLabels && <button onClick={startEditLabels} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+              {!editingPriority && <button onClick={startEditPriority} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
             </div>
-            <p className="text-xs text-slate-500 mb-3">可以把 P1～P4 換成你自己習慣的名稱（例如「最緊急」），任務列表都會跟著換成你設定的文字。</p>
-            <div className="grid grid-cols-1 gap-2">
-              {PRIORITY_LEVELS.map(p => (
-                <div key={p} className="flex items-center gap-3">
-                  <label className="text-xs text-slate-500 w-8 shrink-0">{p}</label>
-                  {editingLabels ? (
-                    <input value={labelDraft[p] || ""} onChange={e => setLabelDraft({ ...labelDraft, [p]: e.target.value })}
-                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+            <p className="text-xs text-slate-500 mb-3">P1～P4 可以各自設定「長字串」和「短字串」兩種自訂文字，下方再選擇不同位置要顯示哪一種。</p>
+            <table className="w-full text-sm mb-3">
+              <thead>
+                <tr className="text-xs text-slate-400">
+                  <th className="text-left font-medium pb-1 w-10"></th>
+                  <th className="text-left font-medium pb-1">長字串</th>
+                  <th className="text-left font-medium pb-1">短字串</th>
+                </tr>
+              </thead>
+              <tbody>
+                {PRIORITY_LEVELS.map(p => (
+                  <tr key={p}>
+                    <td className="text-xs text-slate-500 pr-2 py-1">{p}</td>
+                    <td className="py-1 pr-2">
+                      {editingPriority ? (
+                        <input value={(priorityLabelDraft[p] && priorityLabelDraft[p].long) || ""} onChange={e => updatePriorityDraft(p, "long", e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                      ) : (
+                        <div className="px-2 py-1.5 bg-white rounded-lg">{(priorityLabels[p] && priorityLabels[p].long) || p}</div>
+                      )}
+                    </td>
+                    <td className="py-1">
+                      {editingPriority ? (
+                        <input value={(priorityLabelDraft[p] && priorityLabelDraft[p].short) || ""} onChange={e => updatePriorityDraft(p, "short", e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                      ) : (
+                        <div className="px-2 py-1.5 bg-white rounded-lg">{(priorityLabels[p] && priorityLabels[p].short) || p}</div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="space-y-2">
+              {DISPLAY_CONTEXTS.map(ctx => (
+                <div key={ctx.key} className="flex justify-between items-center text-xs">
+                  <label className="text-slate-500">{ctx.label}：</label>
+                  {editingPriority ? (
+                    <select value={priorityDisplayDraft[ctx.key] || "long"} onChange={e => setPriorityDisplayDraft({ ...priorityDisplayDraft, [ctx.key]: e.target.value })}
+                      className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                      {DISPLAY_MODE_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
                   ) : (
-                    <div className="flex-1 px-3 py-2 bg-white rounded-lg text-sm">{priorityLabels[p] || p}</div>
+                    <span className="font-medium">{DISPLAY_MODE_OPTIONS.find(o => o.key === (priorityDisplay[ctx.key] || "long"))?.label}</span>
                   )}
                 </div>
               ))}
             </div>
-            {editingLabels && (
+            <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingPriority ? "text-slate-600" : "text-slate-400")}>
+              <input type="checkbox" disabled={!editingPriority} checked={editingPriority ? priorityColorOverrideDraft : priorityColorOverride}
+                onChange={e => setPriorityColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+              文字顯示覆蓋顏色
+            </label>
+            {editingPriority && (
               <div className="flex gap-2 mt-3">
-                <button onClick={saveLabels} disabled={savingLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingLabels ? "儲存中…" : "儲存"}</button>
-                <button onClick={() => setEditingLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+                <button onClick={savePriority} disabled={savingPriority} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingPriority ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingPriority(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
               </div>
             )}
           </div>
@@ -1512,38 +1717,154 @@ function SettingsView({ profile, onProfileChange }) {
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="flex justify-between items-center mb-2">
               <h4 className="text-sm font-semibold text-slate-700">任務規模顯示</h4>
-              {!editingScaleLabels && <button onClick={startEditScaleLabels} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+              {!editingScale && <button onClick={startEditScale} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
             </div>
-            <p className="text-xs text-slate-500 mb-3">可以把 S1～S5 換成你自己習慣的名稱（例如「小任務」）。規模會用來計算緊急程度分數。</p>
-            <div className="grid grid-cols-1 gap-2">
-              {SCALE_LEVELS.map(n => {
-                const key = "S" + n;
-                return (
-                  <div key={key} className="flex items-center gap-3">
-                    <label className="text-xs text-slate-500 w-8 shrink-0">{key}</label>
-                    {editingScaleLabels ? (
-                      <input value={scaleLabelDraft[key] || ""} onChange={e => setScaleLabelDraft({ ...scaleLabelDraft, [key]: e.target.value })}
-                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
-                    ) : (
-                      <div className="flex-1 px-3 py-2 bg-white rounded-lg text-sm">{scaleLabels[key] || key}</div>
-                    )}
-                  </div>
-                );
-              })}
+            <p className="text-xs text-slate-500 mb-3">S1～S5 可以各自設定「長字串」和「短字串」兩種自訂文字，下方再選擇不同位置要顯示哪一種。</p>
+            <table className="w-full text-sm mb-3">
+              <thead>
+                <tr className="text-xs text-slate-400">
+                  <th className="text-left font-medium pb-1 w-10"></th>
+                  <th className="text-left font-medium pb-1">長字串</th>
+                  <th className="text-left font-medium pb-1">短字串</th>
+                </tr>
+              </thead>
+              <tbody>
+                {SCALE_LEVELS.map(n => {
+                  const key = "S" + n;
+                  return (
+                    <tr key={key}>
+                      <td className="text-xs text-slate-500 pr-2 py-1">{key}</td>
+                      <td className="py-1 pr-2">
+                        {editingScale ? (
+                          <input value={(scaleLabelDraft[key] && scaleLabelDraft[key].long) || ""} onChange={e => updateScaleDraft(key, "long", e.target.value)}
+                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                        ) : (
+                          <div className="px-2 py-1.5 bg-white rounded-lg">{(scaleLabels[key] && scaleLabels[key].long) || key}</div>
+                        )}
+                      </td>
+                      <td className="py-1">
+                        {editingScale ? (
+                          <input value={(scaleLabelDraft[key] && scaleLabelDraft[key].short) || ""} onChange={e => updateScaleDraft(key, "short", e.target.value)}
+                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                        ) : (
+                          <div className="px-2 py-1.5 bg-white rounded-lg">{(scaleLabels[key] && scaleLabels[key].short) || key}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="space-y-2">
+              {DISPLAY_CONTEXTS.map(ctx => (
+                <div key={ctx.key} className="flex justify-between items-center text-xs">
+                  <label className="text-slate-500">{ctx.label}：</label>
+                  {editingScale ? (
+                    <select value={scaleDisplayDraft[ctx.key] || "long"} onChange={e => setScaleDisplayDraft({ ...scaleDisplayDraft, [ctx.key]: e.target.value })}
+                      className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                      {DISPLAY_MODE_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <span className="font-medium">{DISPLAY_MODE_OPTIONS.find(o => o.key === (scaleDisplay[ctx.key] || "long"))?.label}</span>
+                  )}
+                </div>
+              ))}
             </div>
-            {editingScaleLabels && (
+            <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingScale ? "text-slate-600" : "text-slate-400")}>
+              <input type="checkbox" disabled={!editingScale} checked={editingScale ? scaleColorOverrideDraft : scaleColorOverride}
+                onChange={e => setScaleColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+              文字顯示覆蓋顏色
+            </label>
+            {editingScale && (
               <div className="flex gap-2 mt-3">
-                <button onClick={saveScaleLabels} disabled={savingScaleLabels} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingScaleLabels ? "儲存中…" : "儲存"}</button>
-                <button onClick={() => setEditingScaleLabels(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+                <button onClick={saveScale} disabled={savingScale} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingScale ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingScale(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
               </div>
             )}
           </div>
         </div>
 
-        <div className="mt-6 pt-4 border-t border-slate-100">
-          <h4 className="text-sm font-semibold text-slate-700 mb-2">緊急程度分數曲線</h4>
-          <p className="text-xs text-slate-500 mb-3">緊急程度分數依「剩餘時間」與「任務規模」計算，任務列表的「緊急度」欄位就是用這條曲線即時算出來的。</p>
-          <UrgencyCurveChart scaleLabels={scaleLabels} />
+        <div className="grid md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100">
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">緊急度顯示</h4>
+              {!editingUrgency && <button onClick={startEditUrgency} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+            </div>
+            <p className="text-xs text-slate-500 mb-3">緊急度分數（0.0~2.0）依區間分成 U1～U4，可各自設定「長字串」和「短字串」，下方再選擇不同位置要顯示長字串、短字串、還是原始分數。</p>
+            <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg, #2FAF9B, #E8A33D, #E8544A)" }} />
+            <div className="flex justify-between text-xs text-slate-500 mt-1 mb-3">
+              <span>不急</span>
+              <span>緊急</span>
+            </div>
+            <table className="w-full text-sm mb-3">
+              <thead>
+                <tr className="text-xs text-slate-400">
+                  <th className="text-left font-medium pb-1 w-10"></th>
+                  <th className="text-left font-medium pb-1">長字串</th>
+                  <th className="text-left font-medium pb-1">短字串</th>
+                  <th className="text-left font-medium pb-1">參考原始分數</th>
+                </tr>
+              </thead>
+              <tbody>
+                {URGENCY_LEVELS.map(u => (
+                  <tr key={u}>
+                    <td className="text-xs text-slate-500 pr-2 py-1">{u}</td>
+                    <td className="py-1 pr-2">
+                      {editingUrgency ? (
+                        <input value={(urgencyLabelDraft[u] && urgencyLabelDraft[u].long) || ""} onChange={e => updateUrgencyDraft(u, "long", e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                      ) : (
+                        <div className="px-2 py-1.5 bg-white rounded-lg">{(urgencyLabels[u] && urgencyLabels[u].long) || u}</div>
+                      )}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {editingUrgency ? (
+                        <input value={(urgencyLabelDraft[u] && urgencyLabelDraft[u].short) || ""} onChange={e => updateUrgencyDraft(u, "short", e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white" />
+                      ) : (
+                        <div className="px-2 py-1.5 bg-white rounded-lg">{(urgencyLabels[u] && urgencyLabels[u].short) || u}</div>
+                      )}
+                    </td>
+                    <td className="py-1 text-xs text-slate-400 whitespace-nowrap">{URGENCY_LEVEL_RANGES[u][0].toFixed(1)} ~ {URGENCY_LEVEL_RANGES[u][1].toFixed(1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="space-y-2">
+              {URGENCY_CONTEXTS.map(ctx => (
+                <div key={ctx.key} className="flex justify-between items-center text-xs">
+                  <label className="text-slate-500">{ctx.label}：</label>
+                  {editingUrgency ? (
+                    <select value={urgencyDisplayDraft[ctx.key] || "score"} onChange={e => setUrgencyDisplayDraft({ ...urgencyDisplayDraft, [ctx.key]: e.target.value })}
+                      className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                      {URGENCY_MODE_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <span className="font-medium">{URGENCY_MODE_OPTIONS.find(o => o.key === (urgencyDisplay[ctx.key] || "score"))?.label}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingUrgency ? "text-slate-600" : "text-slate-400")}>
+              <input type="checkbox" disabled={!editingUrgency} checked={editingUrgency ? urgencyColorOverrideDraft : urgencyColorOverride}
+                onChange={e => setUrgencyColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+              文字顯示覆蓋顏色
+            </label>
+            {editingUrgency && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveUrgency} disabled={savingUrgency} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingUrgency ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingUrgency(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <h4 className="text-sm font-semibold text-slate-700 mb-2">緊急程度分數曲線</h4>
+            <p className="text-xs text-slate-500 mb-3">緊急程度分數依「剩餘時間」與「任務規模」計算，任務列表的「緊急度」欄位就是用這條曲線即時算出來的。</p>
+            <UrgencyCurveChart scaleLabels={{
+              S1: scaleLabels.S1?.long, S2: scaleLabels.S2?.long, S3: scaleLabels.S3?.long, S4: scaleLabels.S4?.long, S5: scaleLabels.S5?.long,
+            }} />
+          </div>
         </div>
       </div>
 
@@ -1799,19 +2120,19 @@ function Dashboard({ session, profile, setProfile }) {
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} visibleColumns={visibleColumns} />
+                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} />
               </section>
             )}
           </div>
@@ -1837,7 +2158,7 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
-      {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} />}
+      {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} />}
       {showColumnSettings && (
         <ColumnSettingsModal
           visibleColumns={visibleColumns} onToggleColumn={toggleColumn}
@@ -1846,7 +2167,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
