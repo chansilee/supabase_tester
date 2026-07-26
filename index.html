@@ -585,6 +585,7 @@ function notifMessage(n) {
     case "task_assigned": return n.project_id
       ? `您已被指派處理任務：${n.mission?.title || ""}－於＜${n.project?.name || ""}＞專案中`
       : `您已被指派處理任務：${n.mission?.title || ""}`;
+    case "project_renamed": return `專案＜${n.payload?.old_name || ""}＞現已改名為＜${n.payload?.new_name || ""}＞`;
     default: return "";
   }
 }
@@ -2016,6 +2017,7 @@ function SettingsView({ profile, onProfileChange }) {
 // =====================================================================
 function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -2034,7 +2036,7 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
     setBusy(true); setErr(null);
     try {
       const { data: { user } } = await sb.auth.getUser();
-      const { data: project, error } = await sb.from("projects").insert({ name, creator_id: user.id }).select().single();
+      const { data: project, error } = await sb.from("projects").insert({ name, description: description || null, creator_id: user.id }).select().single();
       if (error) throw error;
       if (selectedIds.length > 0) {
         const rows = selectedIds.map(uid => ({ project_id: project.id, user_id: uid }));
@@ -2094,6 +2096,10 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
 // 編輯專案 Modal（新增/移除成員）
 // =====================================================================
 function EditProjectModal({ project, members, friendProfiles, openMissions, onClose, onChanged }) {
+  const [nameDraft, setNameDraft] = useState(project.name);
+  const [descDraft, setDescDraft] = useState(project.description || "");
+  const [savingInfo, setSavingInfo] = useState(false);
+  const [infoErr, setInfoErr] = useState(null);
   const [memberSearch, setMemberSearch] = useState("");
   const [blockedInfo, setBlockedInfo] = useState(null); // { member, tasks }
   const [confirmRemove, setConfirmRemove] = useState(null); // member
@@ -2107,6 +2113,14 @@ function EditProjectModal({ project, members, friendProfiles, openMissions, onCl
 
   function blockingTasks(memberId) {
     return (openMissions || []).filter(m => m.creator_id === memberId || m.assigned_id === memberId);
+  }
+
+  async function saveProjectInfo() {
+    if (!nameDraft.trim()) { setInfoErr("專案名稱不能留空"); return; }
+    setSavingInfo(true); setInfoErr(null);
+    const { error } = await sb.from("projects").update({ name: nameDraft.trim(), description: descDraft || null }).eq("id", project.id);
+    setSavingInfo(false);
+    if (error) setInfoErr(error.message); else onChanged();
   }
 
   async function addMember(uid) {
@@ -2134,11 +2148,29 @@ function EditProjectModal({ project, members, friendProfiles, openMissions, onCl
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold">編輯專案成員</h2>
+          <h2 className="text-lg font-bold">編輯專案</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
 
-        <h3 className="text-sm font-semibold text-slate-700 mb-2">目前成員</h3>
+        <div className="space-y-2 mb-4">
+          <div>
+            <label className="text-xs text-slate-500">專案名稱</label>
+            <input value={nameDraft} onChange={e => setNameDraft(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">專案描述（可留空）</label>
+            <textarea rows={3} value={descDraft} onChange={e => setDescDraft(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          {infoErr && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{infoErr}</div>}
+          <button onClick={saveProjectInfo} disabled={savingInfo} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">
+            {savingInfo ? "儲存中…" : "儲存基本資料"}
+          </button>
+          <p className="text-xs text-amber-600">若變更「專案名稱」，儲存後會自動通知專案內所有其他成員。</p>
+        </div>
+
+        <h3 className="text-sm font-semibold text-slate-700 mb-2 pt-2 border-t border-slate-100">目前成員</h3>
         <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
           {members.map(m => (
             <div key={m.id} className="flex justify-between items-center bg-slate-50 rounded-lg px-3 py-2 text-sm">
@@ -2557,6 +2589,7 @@ function Dashboard({ session, profile, setProfile }) {
               <div className="flex justify-between items-start">
                 <div>
                   <h2 className="text-lg font-bold mb-1">{currentProject.name}</h2>
+                  {currentProject.description && <p className="text-sm text-slate-600 mb-2 whitespace-pre-wrap">{currentProject.description}</p>}
                   <p className="text-xs text-slate-500 mb-2">發起人：{currentProject.creator?.display_name}</p>
                   <p className="text-xs text-slate-500">專案成員：{currentProjectMembers.map(m => m.display_name).join("、")}</p>
                 </div>
