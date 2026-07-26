@@ -559,11 +559,11 @@ function notifMessage(n) {
   switch (n.type) {
     case "friend_request": return `${n.actor?.display_name} 想加你為好友`;
     case "friend_accepted": return `${n.actor?.display_name} 已接受你的好友邀請`;
-    case "project_added": return `您已被加入${n.project?.name || ""}專案中，可於「專案任務」頁面中查看詳細內容`;
-    case "project_task_added": return `專案${n.project?.name || ""}已新增任務：${n.mission?.title || ""}`;
+    case "project_added": return `您已被加入專案＜${n.project?.name || ""}＞中，可於＜專案任務＞頁面中查看詳細內容`;
+    case "project_task_added": return `專案＜${n.project?.name || ""}＞已新增任務：${n.mission?.title || ""}`;
     case "task_assigned": return n.project_id
-      ? `您已被指派處理任務${n.mission?.title || ""}於${n.project?.name || ""}專案中`
-      : `您已被指派處理任務${n.mission?.title || ""}`;
+      ? `您已被指派處理任務：${n.mission?.title || ""}－於＜${n.project?.name || ""}＞專案中`
+      : `您已被指派處理任務：${n.mission?.title || ""}`;
     default: return "";
   }
 }
