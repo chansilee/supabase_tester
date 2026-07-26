@@ -338,6 +338,7 @@ const STATUS_BAR_COLOR = { added: "#94a3b8", in_progress: "#3b82f6", completed: 
 const TASK_LIST_COLUMNS = [
   { key: "created_at", label: "建立時間" },
   { key: "creator", label: "建立成員" },
+  { key: "assignee", label: "指派給" },
   { key: "updated_at", label: "最後更新" },
   { key: "procrastination_days", label: "拖延天數" },
   { key: "title", label: "任務標題" },
@@ -1110,6 +1111,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
           <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
             {vc.created_at && <th className="px-4 py-2 font-medium">建立時間</th>}
             {vc.creator && <th className="px-4 py-2 font-medium">建立成員</th>}
+            {vc.assignee && <th className="px-4 py-2 font-medium">指派給</th>}
             {vc.updated_at && <th className="px-4 py-2 font-medium">最後更新</th>}
             {vc.procrastination_days && <th className="px-4 py-2 font-medium">拖延天數</th>}
             {vc.title && <th className="px-4 py-2 font-medium">任務標題</th>}
@@ -1131,6 +1133,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
               <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
                 {vc.created_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>}
                 {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
+                {vc.assignee && <td className="px-4 py-3 whitespace-nowrap">{m.assignee?.display_name}</td>}
                 {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
                 {vc.procrastination_days && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{procrastinationDays(m).toFixed(1)}天</td>}
                 {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
@@ -2088,7 +2091,7 @@ function Dashboard({ session, profile, setProfile }) {
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
-    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email)").order("created_at", { ascending: false });
+    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email)").order("created_at", { ascending: false });
     const { data } = await q;
     setMissions(data || []);
   }, []);
@@ -2282,9 +2285,14 @@ function Dashboard({ session, profile, setProfile }) {
               <button onClick={() => setOpenProjectId(null)} className="text-sm text-slate-500 underline">← 返回專案列表</button>
             ) : <div />}
             {openProjectId ? (
-              <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
-                <Icon.Plus className="w-4 h-4" />新增子任務
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                  <Icon.Settings className="w-4 h-4 text-slate-600" />
+                </button>
+                <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
+                  <Icon.Plus className="w-4 h-4" />新增子任務
+                </button>
+              </div>
             ) : (
               <button onClick={() => setShowNewProject(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
                 <Icon.Plus className="w-4 h-4" />新增專案
@@ -2412,18 +2420,24 @@ function Dashboard({ session, profile, setProfile }) {
               <p className="text-xs text-slate-500 mb-2">發起人：{currentProject.creator?.display_name}</p>
               <p className="text-xs text-slate-500">專案成員：{currentProjectMembers.map(m => m.display_name).join("、")}</p>
             </div>
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-              <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
-            </section>
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-              <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
-            </section>
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-              <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
-            </section>
+            {visibleSections.open && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
+                <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+              </section>
+            )}
+            {visibleSections.completed && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
+                <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+              </section>
+            )}
+            {visibleSections.abandoned && (
+              <section>
+                <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
+                <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+              </section>
+            )}
           </div>
         )}
 
