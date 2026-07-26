@@ -2064,6 +2064,11 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
               className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
           </div>
           <div>
+            <label className="text-xs text-slate-500">專案描述（可留空）</label>
+            <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
             <label className="text-xs text-slate-500">專案發起人</label>
             <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm text-slate-500">{currentUserName}</div>
           </div>
