@@ -397,8 +397,7 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleSections, 
     </div>
   );
 }
-const TYPE_LABEL = { private_mission: "私人任務", shared_mission: "分享任務" };
-const PERM_LABEL = { read_only: "唯讀", editable: "可編輯" };
+const TYPE_LABEL = { private_mission: "私人任務", shared_mission: "分享任務" }; // 保留供舊資料相容參考（目前不再用於顯示）
 const PRIORITY_LEVELS = ["P1", "P2", "P3", "P4"];
 const DEFAULT_PRIORITY_LABELS = {
   P1: { long: "P1", short: "P1" }, P2: { long: "P2", short: "P2" },
@@ -553,6 +552,20 @@ function fmtDate(dt) {
   if (!dt) return "—";
   const d = new Date(dt);
   return d.toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+// 依通知類型組成顯示文字
+function notifMessage(n) {
+  switch (n.type) {
+    case "friend_request": return `${n.actor?.display_name} 想加你為好友`;
+    case "friend_accepted": return `${n.actor?.display_name} 已接受你的好友邀請`;
+    case "project_added": return `您已被加入${n.project?.name || ""}專案中，可於「專案任務」頁面中查看詳細內容`;
+    case "project_task_added": return `專案${n.project?.name || ""}已新增任務：${n.mission?.title || ""}`;
+    case "task_assigned": return n.project_id
+      ? `您已被指派處理任務${n.mission?.title || ""}於${n.project?.name || ""}專案中`
+      : `您已被指派處理任務${n.mission?.title || ""}`;
+    default: return "";
+  }
 }
 
 function sortMissions(list, mode, weights) {
@@ -738,14 +751,13 @@ function ResetPasswordScreen({ onDone }) {
 // =====================================================================
 // 新增任務 Modal
 // =====================================================================
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [priority, setPriority] = useState("P2");
   const [scale, setScale] = useState(1);
-  const [missionType, setMissionType] = useState("private_mission");
-  const [permission, setPermission] = useState("read_only");
+  const [assigneeId, setAssigneeId] = useState(currentUserId);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -756,11 +768,11 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
       const { data: { user } } = await sb.auth.getUser();
       const payload = {
         creator_id: user.id,
+        assigned_id: assigneeId,
+        project_id: projectId || null,
         title, content,
         priority, scale,
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
-        mission_type: missionType,
-        shared_permission: missionType === "shared_mission" ? permission : null,
       };
       const { error } = await sb.from("missions").insert(payload);
       if (error) throw error;
@@ -775,7 +787,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold">新增任務</h2>
+          <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
@@ -818,24 +830,16 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">任務類型</label>
-              <select value={missionType} onChange={e => setMissionType(e.target.value)}
+              <label className="text-xs text-slate-500">指派給</label>
+              <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)}
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                <option value="private_mission">私人任務（只有我看得到）</option>
-                <option value="shared_mission">分享任務（所有好友都看得到）</option>
+                <option value={currentUserId}>我自己（{currentUserName}）</option>
+                {(assigneeOptions || []).map(u => (
+                  <option key={u.id} value={u.id}>{u.display_name}</option>
+                ))}
               </select>
             </div>
           </div>
-          {missionType === "shared_mission" && (
-            <div>
-              <label className="text-xs text-slate-500">好友對此任務的權限</label>
-              <select value={permission} onChange={e => setPermission(e.target.value)}
-                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                <option value="read_only">唯讀（好友只能看，不能回覆更新）</option>
-                <option value="editable">可編輯（好友可以回覆更新任務）</option>
-              </select>
-            </div>
-          )}
           {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
           <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
             {busy ? "建立中…" : "建立任務"}
@@ -849,9 +853,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
+  const [projectMembers, setProjectMembers] = useState([]);
   const [replyText, setReplyText] = useState("");
   const [finalComment, setFinalComment] = useState("");
   const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
@@ -861,14 +866,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [editDue, setEditDue] = useState("");
   const [editPriority, setEditPriority] = useState("P2");
   const [editScale, setEditScale] = useState(1);
-  const [editMissionType, setEditMissionType] = useState("private_mission");
-  const [editPermission, setEditPermission] = useState("read_only");
+  const [editAssigneeId, setEditAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
   const load = useCallback(async () => {
     const { data: m } = await sb.from("missions")
-      .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email)")
+      .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), project:projects(id,name)")
       .eq("id", missionId).single();
     setMission(m);
     if (m) {
@@ -876,8 +880,15 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setEditDue(m.due_date ? m.due_date.slice(0, 16) : "");
       setEditPriority(m.priority || "P2");
       setEditScale(m.scale || 1);
-      setEditMissionType(m.mission_type);
-      setEditPermission(m.shared_permission || "read_only");
+      setEditAssigneeId(m.assigned_id);
+      if (m.project_id) {
+        const { data: pm } = await sb.from("project_members")
+          .select("user:profiles!project_members_user_id_fkey(id,display_name)")
+          .eq("project_id", m.project_id);
+        setProjectMembers((pm || []).map(r => r.user));
+      } else {
+        setProjectMembers([]);
+      }
     }
     const { data: u } = await sb.from("mission_updates")
       .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
@@ -900,8 +911,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   if (!mission) return null;
 
   const isCreator = mission.creator_id === currentUser.id;
-  const canReply = mission.status !== "completed" && mission.status !== "abandoned" &&
-    (isCreator || (mission.mission_type === "shared_mission" && mission.shared_permission === "editable"));
+  // 誰能看得到，誰就能回覆更新（跟資料庫 RLS 的可見範圍規則一致）
+  const canReply = mission.status !== "completed" && mission.status !== "abandoned";
+  const typeLabel = mission.project_id ? "專案任務" : (mission.assigned_id === mission.creator_id ? "私人任務" : "私人指派任務");
+  // 編輯時可選的指派對象：專案任務只能選專案成員；個人任務只能選自己或好友
+  const assigneeChoices = mission.project_id
+    ? projectMembers
+    : [{ id: currentUser.id, display_name: "我自己" }, ...(friendProfiles || [])];
 
   async function submitReply(e) {
     e.preventDefault();
@@ -923,8 +939,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       const { error } = await sb.from("missions").update({
         title: editTitle, content: editContent, priority: editPriority, scale: editScale,
         due_date: editDue ? new Date(editDue).toISOString() : null,
-        mission_type: editMissionType,
-        shared_permission: editMissionType === "shared_mission" ? editPermission : null,
+        assigned_id: editAssigneeId,
       }).eq("id", missionId);
       if (error) throw error;
       setEditingBody(false);
@@ -953,7 +968,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         <div className="flex justify-between items-start mb-4">
           <div>
             <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
-            <span className="ml-2 text-xs text-slate-400">{TYPE_LABEL[mission.mission_type]}{mission.mission_type === "shared_mission" ? `（好友：${PERM_LABEL[mission.shared_permission]}）` : ""}</span>
+            <span className="ml-2 text-xs text-slate-400">{typeLabel}{mission.project_id ? `（${mission.project?.name}）` : ""}</span>
           </div>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
@@ -964,12 +979,18 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             <p className="whitespace-pre-wrap text-sm text-slate-700 mb-3">{mission.content}</p>
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 mb-3">
               <div>建立成員：{mission.creator?.display_name}</div>
+              <div>指派給：{mission.assignee?.display_name}</div>
               <div>建立時間：{fmt(mission.created_at)}</div>
               <div>最後更新：{fmt(mission.updated_at)}</div>
               <div>截止時間：{fmt(mission.due_date)}</div>
               <div>重要性：{renderPriorityText(priorityLabels, priorityDisplay, "detail_view", mission.priority, priorityColorOverride)}</div>
               <div>任務規模：{renderScaleText(scaleLabels, scaleDisplay, "detail_view", mission.scale, scaleColorOverride)}</div>
               <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); const u = rd === null ? null : urgencyScore(rd, mission.scale || 1); return renderUrgencyText(urgencyLabels, urgencyDisplay, "detail_view", u, urgencyColorOverride); })()}</div>
+            </div>
+            <div className="text-xs text-slate-400 mb-3">
+              {mission.project_id
+                ? `誰可以看：專案「${mission.project?.name}」的所有成員（${projectMembers.map(p => p.display_name).join("、")}）`
+                : `誰可以看：${[mission.creator?.display_name, mission.assignee?.display_name].filter((v, i, a) => v && a.indexOf(v) === i).join("、")}`}
             </div>
             {isCreator && mission.status !== "completed" && mission.status !== "abandoned" && (
               <button onClick={() => setEditingBody(true)} className="text-xs text-blue-600 underline mb-2">編輯本文</button>
@@ -1003,22 +1024,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <input type="datetime-local" value={editDue} onChange={e => setEditDue(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             <div>
-              <label className="text-xs text-slate-500">任務類型</label>
-              <select value={editMissionType} onChange={e => setEditMissionType(e.target.value)}
+              <label className="text-xs text-slate-500">指派給{mission.project_id ? "（僅限此專案成員）" : "（自己或好友）"}</label>
+              <select value={editAssigneeId} onChange={e => setEditAssigneeId(e.target.value)}
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                <option value="private_mission">私人任務（只有我看得到）</option>
-                <option value="shared_mission">分享任務（所有好友都看得到）</option>
+                {assigneeChoices.map(u => (
+                  <option key={u.id} value={u.id}>{u.id === currentUser.id ? "我自己" : u.display_name}</option>
+                ))}
               </select>
-              {editMissionType === "shared_mission" && (
-                <select value={editPermission} onChange={e => setEditPermission(e.target.value)}
-                  className="mt-2 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
-                  <option value="read_only">唯讀（好友只能看，不能回覆更新）</option>
-                  <option value="editable">可編輯（好友可以回覆更新任務）</option>
-                </select>
-              )}
-              {mission.mission_type === "shared_mission" && editMissionType === "private_mission" && (
-                <p className="text-xs text-amber-600 mt-1">改回私人後，好友將立刻看不到這筆任務、也無法再回覆；但你自己仍看得到他們之前留下的回覆紀錄。</p>
-              )}
             </div>
             <div className="flex gap-2">
               <button onClick={saveBodyEdit} disabled={busy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">儲存</button>
@@ -1058,9 +1070,6 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               placeholder="輸入更新內容…" className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             <button disabled={busy} className="mt-2 bg-blue-600 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">送出更新</button>
           </form>
-        )}
-        {!canReply && mission.status !== "completed" && mission.status !== "abandoned" && (
-          <p className="mt-4 text-xs text-slate-400">你對此任務為唯讀權限，僅能檢視。</p>
         )}
 
         {isCreator && (mission.status === "added" || mission.status === "in_progress") && (
@@ -1977,8 +1986,87 @@ function SettingsView({ profile, onProfileChange }) {
 // =====================================================================
 // 主應用
 // =====================================================================
+// =====================================================================
+// 新增專案 Modal
+// =====================================================================
+function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }) {
+  const [name, setName] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const filteredFriends = (friendProfiles || []).filter(f =>
+    !memberSearch.trim() || (f.display_name || "").toLowerCase().includes(memberSearch.trim().toLowerCase())
+  );
+
+  function toggleMember(id) {
+    setSelectedIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      const { data: project, error } = await sb.from("projects").insert({ name, creator_id: user.id }).select().single();
+      if (error) throw error;
+      if (selectedIds.length > 0) {
+        const rows = selectedIds.map(uid => ({ project_id: project.id, user_id: uid }));
+        const { error: memberErr } = await sb.from("project_members").insert(rows);
+        if (memberErr) throw memberErr;
+      }
+      onCreated();
+      onClose();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">新增專案</h2>
+          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500">專案名稱</label>
+            <input required value={name} onChange={e => setName(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">專案發起人</label>
+            <div className="mt-1 px-3 py-2 bg-slate-50 rounded-lg text-sm text-slate-500">{currentUserName}</div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">新增專案成員（只能從好友中選擇）</label>
+            <input value={memberSearch} onChange={e => setMemberSearch(e.target.value)} placeholder="搜尋好友名稱…"
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div className="mt-2 max-h-48 overflow-y-auto space-y-1">
+              {filteredFriends.length === 0 && <p className="text-xs text-slate-400">找不到符合的好友</p>}
+              {filteredFriends.map(f => (
+                <label key={f.id} className="flex items-center gap-2 text-sm bg-slate-50 rounded-lg px-3 py-2">
+                  <input type="checkbox" checked={selectedIds.includes(f.id)} onChange={() => toggleMember(f.id)} className="w-4 h-4" />
+                  {f.display_name}
+                </label>
+              ))}
+            </div>
+            {selectedIds.length > 0 && <p className="text-xs text-slate-400 mt-2">已選擇 {selectedIds.length} 位成員</p>}
+          </div>
+          {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+          <button disabled={busy || !name.trim()} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+            {busy ? "建立中…" : "建立專案"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ session, profile, setProfile }) {
-  const [tab, setTab] = useState("list"); // list | gantt | done | settings
+  const [tab, setTab] = useState("list"); // list(個人任務) | project | gantt | settings
   const [missions, setMissions] = useState([]);
   const [openMissionId, setOpenMissionId] = useState(null);
   const [showNew, setShowNew] = useState(false);
@@ -1991,6 +2079,12 @@ function Dashboard({ session, profile, setProfile }) {
   const [appliedSearch, setAppliedSearch] = useState("");
   const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc | priority_desc
   const [hiddenIds, setHiddenIds] = useState([]);
+  const [friendProfiles, setFriendProfiles] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [openProjectId, setOpenProjectId] = useState(null);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [currentProjectMembers, setCurrentProjectMembers] = useState([]);
+  const openProjectIdRef = useRef(null);
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
@@ -2005,12 +2099,37 @@ function Dashboard({ session, profile, setProfile }) {
   }, [profile.id]);
 
   const loadNotifs = useCallback(async () => {
-    const { data } = await sb.from("notifications").select("*, actor:profiles!notifications_actor_id_fkey(display_name)")
+    const { data } = await sb.from("notifications")
+      .select("*, actor:profiles!notifications_actor_id_fkey(display_name), mission:missions(title), project:projects(name)")
       .eq("user_id", profile.id).eq("is_read", false).order("created_at", { ascending: false });
     setNotifs(data || []);
   }, [profile.id]);
 
-  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); }, [loadMissions, loadNotifs, loadHiddenIds]);
+  const loadFriendProfiles = useCallback(async () => {
+    const uid = profile.id;
+    const [{ data: asReq }, { data: asAdr }] = await Promise.all([
+      sb.from("friendships").select("addressee:profiles!friendships_addressee_id_fkey(id,display_name,email)").eq("requester_id", uid).eq("status", "accepted"),
+      sb.from("friendships").select("requester:profiles!friendships_requester_id_fkey(id,display_name,email)").eq("addressee_id", uid).eq("status", "accepted"),
+    ]);
+    const f1 = (asReq || []).map(r => r.addressee).filter(Boolean);
+    const f2 = (asAdr || []).map(r => r.requester).filter(Boolean);
+    setFriendProfiles([...f1, ...f2]);
+  }, [profile.id]);
+
+  const loadProjects = useCallback(async () => {
+    const { data } = await sb.from("projects").select("*, creator:profiles!projects_creator_id_fkey(display_name)").order("created_at", { ascending: false });
+    setProjects(data || []);
+  }, []);
+
+  const loadCurrentProjectMembers = useCallback(async (pid) => {
+    if (!pid) { setCurrentProjectMembers([]); return; }
+    const { data } = await sb.from("project_members").select("user:profiles!project_members_user_id_fkey(id,display_name)").eq("project_id", pid);
+    setCurrentProjectMembers((data || []).map(r => r.user));
+  }, []);
+
+  useEffect(() => { openProjectIdRef.current = openProjectId; loadCurrentProjectMembers(openProjectId); }, [openProjectId, loadCurrentProjectMembers]);
+
+  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); loadFriendProfiles(); loadProjects(); }, [loadMissions, loadNotifs, loadHiddenIds, loadFriendProfiles, loadProjects]);
 
   async function hideMission(missionId) {
     setHiddenIds(ids => ids.includes(missionId) ? ids : [...ids, missionId]);
@@ -2023,15 +2142,17 @@ function Dashboard({ session, profile, setProfile }) {
     if (error) loadHiddenIds();
   }
 
-  // Realtime：missions / mission_updates / friendships / mission_hides 任何一張表有變動，就重新抓一次任務列表。
-  // RLS 政策會自動幫每個使用者過濾掉他原本就看不到的變動，不用額外處理權限判斷。
+  // Realtime：missions / mission_updates / friendships / mission_hides / projects / project_members
+  // 任何一張表有變動，就重新抓一次對應資料。RLS 政策會自動幫每個使用者過濾掉他原本就看不到的變動。
   useEffect(() => {
     if (!sb) return;
     const channel = sb.channel("dashboard-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "missions" }, () => loadMissions())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_updates" }, () => loadMissions())
-      .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => loadMissions())
+      .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => { loadMissions(); loadFriendProfiles(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_hides" }, () => loadHiddenIds())
+      .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, () => { loadProjects(); loadCurrentProjectMembers(openProjectIdRef.current); })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${profile.id}` }, (payload) => {
         // 自己的 profiles 資料列在別的裝置被改動時（例如顯示欄位/區塊設定），同步更新這台裝置的畫面
         const updated = payload.new;
@@ -2041,7 +2162,7 @@ function Dashboard({ session, profile, setProfile }) {
       })
       .subscribe();
     return () => { sb.removeChannel(channel); };
-  }, [loadMissions, loadHiddenIds, profile.id, setProfile]);
+  }, [loadMissions, loadHiddenIds, loadFriendProfiles, loadProjects, loadCurrentProjectMembers, profile.id, setProfile]);
 
   const markNotifsRead = useCallback(async () => {
     await sb.from("notifications").update({ is_read: true }).eq("user_id", profile.id).eq("is_read", false);
@@ -2061,12 +2182,14 @@ function Dashboard({ session, profile, setProfile }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [notifOpen, markNotifsRead]);
 
+  const personalMissions = missions.filter(m => !m.project_id);
+
   const searchedMissions = appliedSearch
-    ? missions.filter(m => {
+    ? personalMissions.filter(m => {
         const q = appliedSearch.toLowerCase();
         return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
       })
-    : missions;
+    : personalMissions;
 
   const sortedMissions = sortMissions(searchedMissions, sortMode, profile.priority_weights);
   const hiddenSet = new Set(hiddenIds);
@@ -2083,6 +2206,12 @@ function Dashboard({ session, profile, setProfile }) {
     ganttSortMode,
     profile.priority_weights
   );
+
+  const currentProject = projects.find(p => p.id === openProjectId) || null;
+  const projectAllMissions = sortMissions(missions.filter(m => m.project_id === openProjectId), "created_desc", profile.priority_weights);
+  const projectOpenMissions = projectAllMissions.filter(m => m.status === "added" || m.status === "in_progress");
+  const projectCompletedMissions = projectAllMissions.filter(m => m.status === "completed");
+  const projectAbandonedMissions = projectAllMissions.filter(m => m.status === "abandoned");
 
   function runSearch() { setAppliedSearch(searchInput.trim()); }
   function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
@@ -2105,7 +2234,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","任務列表"],["gantt","甘特圖"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","個人任務"],["project","專案任務"],["gantt","甘特圖"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -2121,7 +2250,7 @@ function Dashboard({ session, profile, setProfile }) {
                 {notifs.length === 0 && <p className="text-xs text-slate-400 p-2">沒有新通知</p>}
                 {notifs.map(n => (
                   <div key={n.id} className="p-2 hover:bg-slate-50 rounded-lg">
-                    {n.type === "friend_request" ? `${n.actor?.display_name} 想加你為好友` : `${n.actor?.display_name} 已接受你的好友邀請`}
+                    {notifMessage(n)}
                   </div>
                 ))}
               </div>
@@ -2133,7 +2262,7 @@ function Dashboard({ session, profile, setProfile }) {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-6">
-        {tab !== "settings" && (
+        {(tab === "list" || tab === "gantt") && (
           <div className="flex justify-end items-center gap-2 mb-4">
             {tab === "list" && (
               <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
@@ -2143,6 +2272,23 @@ function Dashboard({ session, profile, setProfile }) {
             <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
               <Icon.Plus className="w-4 h-4" />新增任務
             </button>
+          </div>
+        )}
+
+        {tab === "project" && (
+          <div className="flex justify-between items-center gap-2 mb-4">
+            {openProjectId ? (
+              <button onClick={() => setOpenProjectId(null)} className="text-sm text-slate-500 underline">← 返回專案列表</button>
+            ) : <div />}
+            {openProjectId ? (
+              <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
+                <Icon.Plus className="w-4 h-4" />新增子任務
+              </button>
+            ) : (
+              <button onClick={() => setShowNewProject(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
+                <Icon.Plus className="w-4 h-4" />新增專案
+              </button>
+            )}
           </div>
         )}
 
@@ -2231,10 +2377,78 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
         {tab === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
+
+        {tab === "project" && !openProjectId && (
+          <div className="bg-white rounded-2xl shadow overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
+                  <th className="px-4 py-2 font-medium">專案名稱</th>
+                  <th className="px-4 py-2 font-medium">發起人</th>
+                  <th className="px-4 py-2 font-medium">建立時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map(p => (
+                  <tr key={p.id} onClick={() => setOpenProjectId(p.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+                    <td className="px-4 py-3 font-medium">{p.name}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-slate-500">{p.creator?.display_name}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(p.created_at)}</td>
+                  </tr>
+                ))}
+                {projects.length === 0 && (
+                  <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400">目前沒有任何專案</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === "project" && openProjectId && currentProject && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl shadow p-5">
+              <h2 className="text-lg font-bold mb-1">{currentProject.name}</h2>
+              <p className="text-xs text-slate-500 mb-2">發起人：{currentProject.creator?.display_name}</p>
+              <p className="text-xs text-slate-500">專案成員：{currentProjectMembers.map(m => m.display_name).join("、")}</p>
+            </div>
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
+              <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+            </section>
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
+              <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+            </section>
+            <section>
+              <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
+              <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} />
+            </section>
+          </div>
+        )}
+
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
-      {showNew && <NewMissionModal onClose={() => setShowNew(false)} onCreated={loadMissions} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} />}
+      {showNew && (
+        <NewMissionModal
+          onClose={() => setShowNew(false)}
+          onCreated={loadMissions}
+          priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
+          priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display}
+          priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override}
+          currentUserId={profile.id} currentUserName={profile.display_name}
+          projectId={tab === "project" ? openProjectId : null}
+          assigneeOptions={tab === "project" ? currentProjectMembers.filter(m => m.id !== profile.id) : friendProfiles}
+        />
+      )}
+      {showNewProject && (
+        <NewProjectModal
+          onClose={() => setShowNewProject(false)}
+          onCreated={loadProjects}
+          friendProfiles={friendProfiles}
+          currentUserName={profile.display_name}
+        />
+      )}
       {showColumnSettings && (
         <ColumnSettingsModal
           visibleColumns={visibleColumns} onToggleColumn={toggleColumn}
@@ -2243,7 +2457,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
