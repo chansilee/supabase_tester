@@ -224,6 +224,8 @@ table { border-collapse: collapse; width: 100%; }
 .mx-auto { margin-left: auto; margin-right: auto; }
 .space-y-2 > * + * { margin-top: 0.5rem; }
 .space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-6 > * + * { margin-top: 1.5rem; }
+.space-y-8 > * + * { margin-top: 2rem; }
 .-top-0\.5 { top: -0.125rem; }
 .-right-0\.5 { right: -0.125rem; }
 .w-4 { width: 1rem; }
@@ -265,6 +267,10 @@ table { border-collapse: collapse; width: 100%; }
 .whitespace-nowrap { white-space: nowrap; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 .border { border-width: 1px; border-style: solid; border-color: #e2e8f0; }
+.border-2 { border-width: 2px; border-style: solid; }
+.border-slate-900 { border-color: #0f172a; }
+.opacity-40 { opacity: 0.4; }
+.w-10 { width: 2.5rem; }
 .border-t { border-top-width: 1px; border-top-style: solid; border-color: #e2e8f0; }
 .border-b { border-bottom-width: 1px; border-bottom-style: solid; border-color: #e2e8f0; }
 .border-l { border-left-width: 1px; border-left-style: solid; border-color: #e2e8f0; }
@@ -339,6 +345,7 @@ const TASK_LIST_COLUMNS = [
   { key: "created_at", label: "建立時間" },
   { key: "creator", label: "建立成員" },
   { key: "assignee", label: "指派給" },
+  { key: "relation", label: "指派關係" },
   { key: "updated_at", label: "最後更新" },
   { key: "procrastination_days", label: "拖延天數" },
   { key: "title", label: "任務標題" },
@@ -551,6 +558,45 @@ function procrastinationTier(status) {
   if (status === "in_progress") return 1;
   return 2;
 }
+
+// 指派關係分類：我指派給我 / 我指派給別人 / 別人指派給我 / 別人指派別人
+const ASSIGN_ICON_LEFT_PATH = "M 91.122603 126.68167 A 5.0557055 5.3465996 0 0 0 86.067098 132.02812 A 5.0557055 5.3465996 0 0 0 91.122603 137.37456 A 5.0557055 5.3465996 0 0 0 96.178625 132.02812 A 5.0557055 5.3465996 0 0 0 91.122603 126.68167 z M 91.888965 138.81168 C 90.614639 138.72476 89.292477 138.82377 88.239058 139.13001 C 85.500165 139.92623 83.45166 142.55949 82.852307 146.05465 C 82.581583 147.63338 82.600345 147.9731 83.00682 148.82968 C 83.278857 149.40295 83.760525 149.91167 84.17419 150.06319 C 84.561511 150.20506 87.771498 150.33074 91.307605 150.34224 C 98.430567 150.36538 98.945189 150.26702 99.568599 148.76198 C 99.979626 147.76967 99.632413 144.92962 98.915409 143.41864 C 98.196316 141.90327 96.690869 140.33712 95.252067 139.60802 C 94.389871 139.17111 93.163291 138.89861 91.888965 138.81168 z";
+const ASSIGN_ICON_RIGHT_PATH = "M 128.08624 126.70441 A 5.0557055 5.3465996 0 0 0 123.03022 132.05085 A 5.0557055 5.3465996 0 0 0 128.08624 137.39781 A 5.0557055 5.3465996 0 0 0 133.14174 132.05085 A 5.0557055 5.3465996 0 0 0 128.08624 126.70441 z M 127.96945 138.99772 C 125.53574 138.98718 125.15719 139.05424 123.87358 139.7248 C 121.36181 141.03696 119.67125 144.07786 119.67125 147.28403 C 119.67125 148.97851 120.08539 149.73473 121.25875 150.18256 C 121.47703 150.26586 124.7091 150.3107 128.44126 150.2823 C 134.69512 150.23469 135.27043 150.19161 135.78189 149.72833 C 137.05158 148.57824 136.95113 145.85334 135.53695 143.09204 C 134.62993 141.32101 133.14476 139.89916 131.64261 139.36307 C 131.07429 139.16025 129.50691 139.00472 127.96945 138.99772 z";
+const ASSIGN_ICON_ARROW_PATH = "M 111.85105 133.95875 C 111.25311 133.95875 110.41083 134.70811 110.41083 135.23981 C 110.41083 135.46254 110.65222 135.90144 110.94723 136.21546 L 111.48363 136.78648 L 107.66165 136.96012 C 105.5596 137.05563 103.65 137.2067 103.41849 137.2955 C 102.75608 137.54969 102.60094 138.66109 103.14409 139.26127 C 103.57017 139.73207 103.97648 139.77958 107.56036 139.77958 L 111.50741 139.77958 L 110.95912 140.4767 C 110.25183 141.37592 110.26445 142.02828 110.99891 142.54272 C 111.32233 142.76926 111.68197 142.95458 111.79834 142.95458 C 112.24615 142.95458 116.36785 139.05358 116.44095 138.56053 C 116.53462 137.92912 112.57451 133.95875 111.85105 133.95875 z";
+const ASSIGN_ICON_GREEN = "#22c55e";
+const ASSIGN_ICON_GRAY = "#94a3b8";
+function AssignRelationIcon({ leftGreen, rightGreen, className }) {
+  return (
+    <svg viewBox="80 124 60 29" className={className}>
+      <path d={ASSIGN_ICON_LEFT_PATH} fill={leftGreen ? ASSIGN_ICON_GREEN : ASSIGN_ICON_GRAY} />
+      <path d={ASSIGN_ICON_ARROW_PATH} fill={ASSIGN_ICON_GREEN} />
+      <path d={ASSIGN_ICON_RIGHT_PATH} fill={rightGreen ? ASSIGN_ICON_GREEN : ASSIGN_ICON_GRAY} />
+    </svg>
+  );
+}
+
+const RELATION_FILTERS_PERSONAL = [
+  { key: "self_self", label: "我指派給我", leftGreen: true, rightGreen: true },
+  { key: "self_other", label: "我指派給別人", leftGreen: true, rightGreen: false },
+  { key: "other_self", label: "別人指派給我", leftGreen: false, rightGreen: true },
+];
+const RELATION_FILTERS_PROJECT = [
+  ...RELATION_FILTERS_PERSONAL,
+  { key: "other_other", label: "別人指派別人", leftGreen: false, rightGreen: false },
+];
+const DEFAULT_RELATION_FILTER = { self_self: true, self_other: true, other_self: true, other_other: true };
+function relationCategory(m, uid) {
+  if (m.creator_id === uid && m.assigned_id === uid) return "self_self";
+  if (m.creator_id === uid && m.assigned_id !== uid) return "self_other";
+  if (m.creator_id !== uid && m.assigned_id === uid) return "other_self";
+  return "other_other";
+}
+const RELATION_ICON_PROPS = {
+  self_self: { leftGreen: true, rightGreen: true },
+  self_other: { leftGreen: true, rightGreen: false },
+  other_self: { leftGreen: false, rightGreen: true },
+  other_other: { leftGreen: false, rightGreen: false },
+};
 
 const PRIORITY_SCORE_MAP = { P1: 1, P2: 2, P3: 3, P4: 4 };
 const DEFAULT_PRIORITY_WEIGHTS = { w1: 1, w2: 1 };
@@ -1145,6 +1191,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
             {vc.created_at && <th className="px-4 py-2 font-medium">建立時間</th>}
             {vc.creator && <th className="px-4 py-2 font-medium">建立成員</th>}
             {vc.assignee && <th className="px-4 py-2 font-medium">指派給</th>}
+            {vc.relation && <th className="px-4 py-2 font-medium">指派關係</th>}
             {vc.updated_at && <th className="px-4 py-2 font-medium">最後更新</th>}
             {vc.procrastination_days && <th className="px-4 py-2 font-medium">拖延天數</th>}
             {vc.title && <th className="px-4 py-2 font-medium">任務標題</th>}
@@ -1167,6 +1214,11 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
                 {vc.created_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>}
                 {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
                 {vc.assignee && <td className="px-4 py-3 whitespace-nowrap">{m.assignee?.display_name}</td>}
+                {vc.relation && (
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <AssignRelationIcon {...RELATION_ICON_PROPS[relationCategory(m, currentUserId)]} className="w-10 h-6" />
+                  </td>
+                )}
                 {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
                 {vc.procrastination_days && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{procrastinationDays(m).toFixed(1)}天</td>}
                 {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
@@ -2258,6 +2310,57 @@ function EditProjectModal({ project, members, friendProfiles, openMissions, onCl
   );
 }
 
+// =====================================================================
+// 指派關係篩選列 + 檢視模式切換（列表／甘特圖）
+// =====================================================================
+function RelationFilterBar({ options, value, onChange }) {
+  return (
+    <div className="bg-white rounded-2xl shadow p-3 mb-4">
+      <p className="text-xs text-slate-400 mb-2">指派關係篩選（可複選，按下取消代表隱藏該類別）</p>
+      <div className="flex gap-3 flex-wrap">
+        {options.map(o => {
+          const active = !!value[o.key];
+          return (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => onChange(o.key)}
+              title={o.label}
+              className="flex items-center justify-center rounded-lg"
+              style={{
+                position: "relative",
+                width: 76,
+                height: 44,
+                ...(active
+                  ? { border: "1px solid #cbd5e1", boxShadow: "0 1px 3px rgba(15,23,42,0.10)", background: "#ffffff" }
+                  : { border: "1px solid #e2e8f0", background: "#ffffff", opacity: 0.4 }),
+              }}
+            >
+              {active && (
+                <span style={{
+                  position: "absolute", top: -6, left: -6, width: 16, height: 16, borderRadius: "50%",
+                  background: "#2563eb", color: "#ffffff", fontSize: 10, lineHeight: 1,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>✓</span>
+              )}
+              <AssignRelationIcon leftGreen={o.leftGreen} rightGreen={o.rightGreen} className="w-10 h-6" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ViewModeToggle({ mode, onChange }) {
+  return (
+    <div className="flex gap-1 text-xs">
+      <button onClick={() => onChange("list")} className={"px-3 py-1.5 rounded-lg " + (mode === "list" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>列表檢視</button>
+      <button onClick={() => onChange("gantt")} className={"px-3 py-1.5 rounded-lg " + (mode === "gantt" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>甘特圖檢視</button>
+    </div>
+  );
+}
+
 function Dashboard({ session, profile, setProfile }) {
   const [tab, setTab] = useState("list"); // list(個人任務) | project | gantt | settings
   const [missions, setMissions] = useState([]);
@@ -2271,6 +2374,9 @@ function Dashboard({ session, profile, setProfile }) {
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc | priority_desc
+  const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
+  const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
+  const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
   const [hiddenIds, setHiddenIds] = useState([]);
   const [friendProfiles, setFriendProfiles] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -2398,13 +2504,14 @@ function Dashboard({ session, profile, setProfile }) {
   }, [notifOpen, markNotifsRead]);
 
   const personalMissions = missions.filter(m => !m.project_id);
+  const relationFilteredPersonal = personalMissions.filter(m => relationFilter[relationCategory(m, profile.id)]);
 
   const searchedMissions = appliedSearch
-    ? personalMissions.filter(m => {
+    ? relationFilteredPersonal.filter(m => {
         const q = appliedSearch.toLowerCase();
         return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
       })
-    : personalMissions;
+    : relationFilteredPersonal;
 
   const sortedMissions = sortMissions(searchedMissions, sortMode, profile.priority_weights);
   const hiddenSet = new Set(hiddenIds);
@@ -2417,16 +2524,24 @@ function Dashboard({ session, profile, setProfile }) {
 
   const [ganttSortMode, setGanttSortMode] = useState("created_desc");
   const ganttMissions = sortMissions(
-    missions.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
+    relationFilteredPersonal.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
     ganttSortMode,
     profile.priority_weights
   );
 
   const currentProject = projects.find(p => p.id === openProjectId) || null;
-  const projectAllMissions = sortMissions(missions.filter(m => m.project_id === openProjectId), "created_desc", profile.priority_weights);
+  const projectMissionsRaw = missions.filter(m => m.project_id === openProjectId);
+  const projectOpenMissionsAll = projectMissionsRaw.filter(m => m.status === "added" || m.status === "in_progress");
+  const projectMissionsFiltered = projectMissionsRaw.filter(m => relationFilter[relationCategory(m, profile.id)]);
+  const projectAllMissions = sortMissions(projectMissionsFiltered, "created_desc", profile.priority_weights);
   const projectOpenMissions = projectAllMissions.filter(m => m.status === "added" || m.status === "in_progress");
   const projectCompletedMissions = projectAllMissions.filter(m => m.status === "completed");
   const projectAbandonedMissions = projectAllMissions.filter(m => m.status === "abandoned");
+  const projectGanttMissions = sortMissions(
+    projectMissionsFiltered.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
+    ganttSortMode,
+    profile.priority_weights
+  );
 
   function runSearch() { setAppliedSearch(searchInput.trim()); }
   function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
@@ -2442,6 +2557,9 @@ function Dashboard({ session, profile, setProfile }) {
     setProfile(p => ({ ...p, visible_sections: updated }));
     await sb.from("profiles").update({ visible_sections: updated }).eq("id", profile.id);
   }
+  function toggleRelation(key) {
+    setRelationFilter(f => ({ ...f, [key]: !f[key] }));
+  }
 
   return (
     <div className="min-h-screen">
@@ -2449,7 +2567,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","個人任務"],["project","專案任務"],["gantt","甘特圖"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","個人任務"],["project","專案任務"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -2477,29 +2595,37 @@ function Dashboard({ session, profile, setProfile }) {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-6">
-        {(tab === "list" || tab === "gantt") && (
-          <div className="flex justify-end items-center gap-2 mb-4">
-            {tab === "list" && (
-              <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
-                <Icon.Settings className="w-4 h-4 text-slate-600" />
+        {tab === "list" && (
+          <div className="flex justify-between items-center gap-2 mb-4 flex-wrap">
+            <ViewModeToggle mode={personalViewMode} onChange={setPersonalViewMode} />
+            <div className="flex items-center gap-2">
+              {personalViewMode === "list" && (
+                <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                  <Icon.Settings className="w-4 h-4 text-slate-600" />
+                </button>
+              )}
+              <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
+                <Icon.Plus className="w-4 h-4" />新增任務
               </button>
-            )}
-            <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
-              <Icon.Plus className="w-4 h-4" />新增任務
-            </button>
+            </div>
           </div>
         )}
 
         {tab === "project" && (
-          <div className="flex justify-between items-center gap-2 mb-4">
+          <div className="flex justify-between items-center gap-2 mb-4 flex-wrap">
             {openProjectId ? (
-              <button onClick={() => setOpenProjectId(null)} className="text-sm text-slate-500 underline">← 返回專案列表</button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setOpenProjectId(null)} className="text-sm text-slate-500 underline">← 返回專案列表</button>
+                <ViewModeToggle mode={projectViewMode} onChange={setProjectViewMode} />
+              </div>
             ) : <div />}
             {openProjectId ? (
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
-                  <Icon.Settings className="w-4 h-4 text-slate-600" />
-                </button>
+                {projectViewMode === "list" && (
+                  <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                    <Icon.Settings className="w-4 h-4 text-slate-600" />
+                  </button>
+                )}
                 <button onClick={() => setShowNew(true)} className="flex items-center gap-1 bg-blue-600 text-white rounded-lg px-4 py-2 text-sm">
                   <Icon.Plus className="w-4 h-4" />新增子任務
                 </button>
@@ -2513,6 +2639,10 @@ function Dashboard({ session, profile, setProfile }) {
         )}
 
         {tab === "list" && (
+          <RelationFilterBar options={RELATION_FILTERS_PERSONAL} value={relationFilter} onChange={toggleRelation} />
+        )}
+
+        {tab === "list" && personalViewMode === "list" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4">
             <div className="flex gap-2">
               <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
@@ -2548,7 +2678,7 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
 
-        {tab === "list" && (
+        {tab === "list" && personalViewMode === "list" && (
           <div className="space-y-8">
             {visibleSections.open && (
               <section>
@@ -2578,7 +2708,7 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
 
-        {tab === "gantt" && (
+        {tab === "list" && personalViewMode === "gantt" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4 flex justify-end">
             <div className="flex gap-1 text-xs flex-wrap">
               <button onClick={() => setGanttSortMode("created_desc")}
@@ -2596,7 +2726,7 @@ function Dashboard({ session, profile, setProfile }) {
             </div>
           </div>
         )}
-        {tab === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
+        {tab === "list" && personalViewMode === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
 
         {tab === "project" && !openProjectId && (
           <div className="bg-white rounded-2xl shadow overflow-x-auto">
@@ -2645,7 +2775,7 @@ function Dashboard({ session, profile, setProfile }) {
                         <Icon.Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => projectOpenMissions.length > 0 ? setShowDeleteBlockedInfo(true) : setShowDeleteProjectConfirm(true)}
+                        onClick={() => projectOpenMissionsAll.length > 0 ? setShowDeleteBlockedInfo(true) : setShowDeleteProjectConfirm(true)}
                         title="刪除專案"
                         className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9"
                       >
@@ -2672,28 +2802,57 @@ function Dashboard({ session, profile, setProfile }) {
                 title="無法刪除此專案"
                 hideCancel
                 confirmLabel="我知道了"
-                message={`還有 ${projectOpenMissions.length} 筆未結案任務（已新增／進行中），需先轉指派、完成或棄置後才能刪除專案。\n\n` + projectOpenMissions.map(t => `．${t.title}`).join("\n")}
+                message={`還有 ${projectOpenMissionsAll.length} 筆未結案任務（已新增／進行中），需先轉指派、完成或棄置後才能刪除專案。\n\n` + projectOpenMissionsAll.map(t => `．${t.title}`).join("\n")}
                 onConfirm={() => setShowDeleteBlockedInfo(false)}
                 onCancel={() => setShowDeleteBlockedInfo(false)}
               />
             )}
-            {visibleSections.open && (
-              <section>
-                <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
-              </section>
+
+            <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} />
+
+            {projectViewMode === "list" && (
+              <>
+                {visibleSections.open && (
+                  <section>
+                    <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
+                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                  </section>
+                )}
+                {visibleSections.completed && (
+                  <section>
+                    <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
+                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                  </section>
+                )}
+                {visibleSections.abandoned && (
+                  <section>
+                    <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
+                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                  </section>
+                )}
+              </>
             )}
-            {visibleSections.completed && (
-              <section>
-                <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
-              </section>
-            )}
-            {visibleSections.abandoned && (
-              <section>
-                <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
-              </section>
+
+            {projectViewMode === "gantt" && (
+              <>
+                <div className="bg-white rounded-2xl shadow p-4 flex justify-end">
+                  <div className="flex gap-1 text-xs flex-wrap">
+                    <button onClick={() => setGanttSortMode("created_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                    <button onClick={() => setGanttSortMode("due_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                    <button onClick={() => setGanttSortMode("priority_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+                    <button onClick={() => setGanttSortMode("scale_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+                    <button onClick={() => setGanttSortMode("scale_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+                    <button onClick={() => setGanttSortMode("procrastination_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                  </div>
+                </div>
+                <GanttView missions={projectGanttMissions} onOpen={setOpenMissionId} />
+              </>
             )}
           </div>
         )}
@@ -2726,7 +2885,7 @@ function Dashboard({ session, profile, setProfile }) {
           project={currentProject}
           members={currentProjectMembers}
           friendProfiles={friendProfiles}
-          openMissions={projectOpenMissions}
+          openMissions={projectOpenMissionsAll}
           onClose={() => setShowEditProject(false)}
           onChanged={() => { loadCurrentProjectMembers(openProjectId); loadProjects(); loadMissions(); }}
         />
