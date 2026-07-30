@@ -610,6 +610,7 @@ const RELATION_ICON_PROPS = {
   other_self: { leftGreen: false, rightGreen: true },
   other_other: { leftGreen: false, rightGreen: false },
 };
+const RELATION_LABELS = { self_self: "我指派給我", self_other: "我指派給別人", other_self: "別人指派給我", other_other: "別人指派別人" };
 
 const PRIORITY_SCORE_MAP = { P1: 1, P2: 2, P3: 3, P4: 4 };
 const DEFAULT_PRIORITY_WEIGHTS = { w1: 1, w2: 1 };
@@ -1087,7 +1088,11 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 : `誰可以看：${[mission.creator?.display_name, mission.assignee?.display_name].filter((v, i, a) => v && a.indexOf(v) === i).join("、")}`}
             </div>
             {isCreator && mission.status !== "completed" && mission.status !== "abandoned" && (
-              <button onClick={() => setEditingBody(true)} className="text-xs text-blue-600 underline mb-2">編輯本文</button>
+              <div className="flex justify-end mb-2">
+                <button onClick={() => setEditingBody(true)} title="編輯本文" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
+                  <Icon.Edit className="w-4 h-4" />
+                </button>
+              </div>
             )}
           </div>
         ) : (
@@ -1212,7 +1217,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode }) {
   const vc = visibleColumns || DEFAULT_VISIBLE_COLUMNS;
   const colCount = TASK_LIST_COLUMNS.filter(c => vc[c.key]).length || 1;
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -1256,7 +1261,9 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
                 {vc.assignee && <td className="px-4 py-3 whitespace-nowrap">{m.assignee?.display_name}</td>}
                 {vc.relation && (
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <AssignRelationIcon {...RELATION_ICON_PROPS[relationCategory(m, currentUserId)]} className="w-10 h-6" />
+                    {relationDisplayMode === "text"
+                      ? RELATION_LABELS[relationCategory(m, currentUserId)]
+                      : <AssignRelationIcon {...RELATION_ICON_PROPS[relationCategory(m, currentUserId)]} className="w-10 h-6" />}
                   </td>
                 )}
                 {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
@@ -1720,6 +1727,27 @@ function SettingsView({ profile, onProfileChange }) {
     }
   }
 
+  const relationFilterDisplay = profile.relation_filter_display || "logo";
+  const [editingOtherDisplay, setEditingOtherDisplay] = useState(false);
+  const [relationFilterDisplayDraft, setRelationFilterDisplayDraft] = useState(relationFilterDisplay);
+  const [savingOtherDisplay, setSavingOtherDisplay] = useState(false);
+
+  function startEditOtherDisplay() {
+    setRelationFilterDisplayDraft(relationFilterDisplay);
+    setEditingOtherDisplay(true);
+  }
+  async function saveOtherDisplay() {
+    setSavingOtherDisplay(true);
+    const { error } = await sb.from("profiles").update({ relation_filter_display: relationFilterDisplayDraft }).eq("id", profile.id);
+    setSavingOtherDisplay(false);
+    if (!error) {
+      onProfileChange({ ...profile, relation_filter_display: relationFilterDisplayDraft });
+      setEditingOtherDisplay(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+
   const loadFriends = useCallback(async () => {
     const uid = profile.id;
     const [{ data: asReq }, { data: asAdr }, { data: inc }, { data: out }] = await Promise.all([
@@ -2051,6 +2079,34 @@ function SettingsView({ profile, onProfileChange }) {
             }} />
           </div>
         </div>
+
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">其他顯示設定</h4>
+              {!editingOtherDisplay && <button onClick={startEditOtherDisplay} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+            </div>
+            <div className="flex justify-between items-center text-xs">
+              <label className="text-slate-500">指派關係篩選呈現方式：</label>
+              {editingOtherDisplay ? (
+                <select value={relationFilterDisplayDraft} onChange={e => setRelationFilterDisplayDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  <option value="logo">logo顯示</option>
+                  <option value="text">字樣顯示</option>
+                </select>
+              ) : (
+                <span className="font-medium">{relationFilterDisplay === "text" ? "字樣顯示" : "logo顯示"}</span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。</p>
+            {editingOtherDisplay && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveOtherDisplay} disabled={savingOtherDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingOtherDisplay ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingOtherDisplay(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
     <div className="grid md:grid-cols-2 gap-4">
@@ -2353,13 +2409,21 @@ function EditProjectModal({ project, members, friendProfiles, openMissions, onCl
 // =====================================================================
 // 指派關係篩選列 + 檢視模式切換（列表／甘特圖）
 // =====================================================================
-function RelationFilterBar({ options, value, onChange }) {
+function RelationFilterBar({ options, value, onChange, displayMode }) {
   return (
     <div className="bg-white rounded-2xl shadow p-3 mb-4">
       <p className="text-xs text-slate-400 mb-2">指派關係篩選（可複選，按下取消代表隱藏該類別）</p>
       <div className="flex gap-3 flex-wrap">
         {options.map(o => {
           const active = !!value[o.key];
+          if (displayMode === "text") {
+            return (
+              <label key={o.key} className="flex items-center gap-1.5 text-xs bg-slate-50 rounded-lg px-2.5 py-1.5">
+                <input type="checkbox" checked={active} onChange={() => onChange(o.key)} className="w-4 h-4" />
+                {o.label}
+              </label>
+            );
+          }
           return (
             <button
               key={o.key}
@@ -2679,7 +2743,7 @@ function Dashboard({ session, profile, setProfile }) {
         )}
 
         {tab === "list" && (
-          <RelationFilterBar options={RELATION_FILTERS_PERSONAL} value={relationFilter} onChange={toggleRelation} />
+          <RelationFilterBar options={RELATION_FILTERS_PERSONAL} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display} />
         )}
 
         {tab === "list" && personalViewMode === "list" && (
@@ -2723,26 +2787,26 @@ function Dashboard({ session, profile, setProfile }) {
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
               </section>
             )}
           </div>
@@ -2848,26 +2912,26 @@ function Dashboard({ session, profile, setProfile }) {
               />
             )}
 
-            <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} />
+            <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display} />
 
             {projectViewMode === "list" && (
               <>
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} />
+                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
                   </section>
                 )}
               </>
