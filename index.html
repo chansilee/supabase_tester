@@ -310,6 +310,19 @@ table { border-collapse: collapse; width: 100%; }
 .overflow-y-auto { overflow-y: auto; }
 .cursor-pointer { cursor: pointer; }
   body { font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  :root { --blue: #2563eb; }
+  .tl-day-col { position: relative; }
+  .tl-day-cell { position: relative; }
+  .tl-day-col.is-today { background: rgba(111,163,224,.15); color: var(--blue); font-weight: 700; }
+  .tl-day-cell.is-today { background: rgba(111,163,224,.08); }
+  .tl-day-col.is-today::after {
+    content: ''; position: absolute; left: var(--now-line-left, 50%); bottom: 0; height: 6px; width: 0;
+    border-left: 1.5px dashed rgba(30,30,30,0.35); transform: translateX(-50%); pointer-events: none;
+  }
+  .tl-day-cell.is-today::after {
+    content: ''; position: absolute; left: var(--now-line-left, 50%); top: 0; bottom: 0; width: 0;
+    border-left: 1.5px dashed rgba(30,30,30,0.35); transform: translateX(-50%); z-index: 1; pointer-events: none;
+  }
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 </style>
@@ -558,6 +571,50 @@ function procrastinationTier(status) {
   if (status === "added") return 0;
   if (status === "in_progress") return 1;
   return 2;
+}
+
+// 甘特圖用：判斷兩個日期是不是同一天（只比較年月日，忽略時分秒）
+// 甘特圖表頭用：星期幾中文標籤（對應 Date.getDay() 0~6）
+const WEEKDAY_LABELS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+// 甘特圖用：現在時間在當天 24 小時裡的位置百分比（精度：最近的半小時）
+function nowLinePercent() {
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const rounded = Math.round(minutes / 30) * 30;
+  return Math.min(100, (rounded / 1440) * 100);
+}
+
+// 把數值四捨五入到最近的 0.5，整數就不顯示小數點
+function roundHalfStep(n) {
+  const r = Math.round(n * 2) / 2;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+// 剩餘天數/小時文字：>=1 天顯示天數（精確到小數點一位），<1 天改顯示小時（精確到 0.5 小時）；已逾期則顯示「已逾期」
+function remainingTimeText(dueDate) {
+  if (!dueDate) return null;
+  const diffMs = new Date(dueDate).getTime() - Date.now();
+  const overdue = diffMs < 0;
+  const absMs = Math.abs(diffMs);
+  const absDays = absMs / 86400000;
+  const absHours = absMs / 3600000;
+  const value = absDays >= 1 ? `${absDays.toFixed(1)}天` : `${roundHalfStep(absHours)}小時`;
+  return overdue ? `已逾期${value}` : `剩${value}`;
+}
+// 依「截止時間顯示設定」組出要顯示的文字，並視需要套用緊急度顏色
+function renderDueDate(m, mode, colorOverride) {
+  if (!m.due_date) return "—";
+  let text;
+  if (mode === "remaining_only") text = remainingTimeText(m.due_date);
+  else if (mode === "raw_plus_remaining") text = `${fmt(m.due_date)} (${remainingTimeText(m.due_date)})`;
+  else text = fmt(m.due_date);
+  if (!colorOverride) return text;
+  const rd = remainingDays(m.due_date);
+  const color = urgencyColor(urgencyScore(rd, m.scale || 1));
+  return <span style={{ color }}>{text}</span>;
 }
 
 // 指派關係分類：我指派給我 / 我指派給別人 / 別人指派給我 / 別人指派別人
@@ -939,7 +996,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [projectMembers, setProjectMembers] = useState([]);
@@ -1077,7 +1134,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div>指派給：{mission.assignee?.display_name}</div>
               <div>建立時間：{fmt(mission.created_at)}</div>
               <div>最後更新：{fmt(mission.updated_at)}</div>
-              <div>截止時間：{fmt(mission.due_date)}</div>
+              <div>截止時間：{renderDueDate(mission, dueDateDisplayDetail, dueDateColorOverride)}</div>
               <div>重要性：{renderPriorityText(priorityLabels, priorityDisplay, "detail_view", mission.priority, priorityColorOverride)}</div>
               <div>任務規模：{renderScaleText(scaleLabels, scaleDisplay, "detail_view", mission.scale, scaleColorOverride)}</div>
               <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); const u = rd === null ? null : urgencyScore(rd, mission.scale || 1); return renderUrgencyText(urgencyLabels, urgencyDisplay, "detail_view", u, urgencyColorOverride); })()}</div>
@@ -1217,7 +1274,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride }) {
   const vc = visibleColumns || DEFAULT_VISIBLE_COLUMNS;
   const colCount = TASK_LIST_COLUMNS.filter(c => vc[c.key]).length || 1;
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -1272,7 +1329,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
                 {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride)}</td>}
                 {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride)}</td>}
                 {vc.urgency && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride)}</td>}
-                {vc.due_date && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.due_date)}</td>}
+                {vc.due_date && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderDueDate(m, dueDateDisplayList, dueDateColorOverride)}</td>}
                 {vc.status && (
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
@@ -1328,6 +1385,8 @@ function GanttView({ missions, onOpen }) {
   const [viewStart, setViewStart] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 3); d.setHours(0,0,0,0); return d; });
   const totalDays = 30;
   const viewEnd = useMemo(() => { const d = new Date(viewStart); d.setDate(d.getDate() + totalDays); return d; }, [viewStart]);
+  const today = new Date();
+  const nowLeftPct = nowLinePercent();
 
   function shift(days) {
     setViewStart(d => { const nd = new Date(d); nd.setDate(nd.getDate() + days); return nd; });
@@ -1349,7 +1408,10 @@ function GanttView({ missions, onOpen }) {
     const visible = clampedEnd >= viewStart && clampedStart <= viewEnd;
     const left = Math.max(0, dayDiff(viewStart, clampedStart)) * pxPerDay;
     const width = Math.max(dayDiff(clampedStart, clampedEnd) * pxPerDay, 6);
-    return { m, visible, left, width };
+    // 色塊顏色：依緊急度分數（0~2）對應青綠→橘→紅；沒有截止時間就用狀態色當備案
+    const rd = remainingDays(m.due_date);
+    const barColor = rd === null ? STATUS_BAR_COLOR[m.status] : urgencyColor(urgencyScore(rd, m.scale || 1));
+    return { m, visible, left, width, barColor };
   });
 
   return (
@@ -1369,20 +1431,34 @@ function GanttView({ missions, onOpen }) {
       <div className="overflow-x-auto">
         <div style={{ width: totalDays * pxPerDay + 180 }}>
           <div className="flex sticky top-0 bg-white z-10" style={{ paddingLeft: 180 }}>
-            {days.map((d, i) => (
-              <div key={i} style={{ width: pxPerDay }} className={"text-[10px] text-center border-l border-slate-100 py-1 " + (d.toDateString() === new Date().toDateString() ? "bg-blue-50 font-bold text-blue-600" : "text-slate-400")}>
-                {d.getMonth()+1}/{d.getDate()}
-              </div>
-            ))}
+            {days.map((d, i) => {
+              const todayCol = isSameDay(d, today);
+              return (
+                <div key={i} style={{ width: pxPerDay, ...(todayCol ? { "--now-line-left": nowLeftPct + "%" } : {}) }}
+                  className={"tl-day-col text-[10px] text-center border-l border-slate-100 py-1 " + (todayCol ? "is-today" : "text-slate-400")}>
+                  <div>{d.getMonth()+1}/{d.getDate()}</div>
+                  <div>{WEEKDAY_LABELS[d.getDay()]}</div>
+                </div>
+              );
+            })}
           </div>
-          {rows.map(({ m, visible, left, width }) => (
+          {rows.map(({ m, visible, left, width, barColor }) => (
             <div key={m.id} className="flex items-center border-t border-slate-100" style={{ height: 40 }}>
               <div style={{ width: 180 }} className="pr-2 text-xs truncate font-medium" title={m.title}>{m.title}</div>
               <div className="relative flex-1" style={{ height: "100%" }}>
+                <div className="flex absolute inset-0">
+                  {days.map((d, i) => {
+                    const todayCol = isSameDay(d, today);
+                    return (
+                      <div key={i} style={{ width: pxPerDay, ...(todayCol ? { "--now-line-left": nowLeftPct + "%" } : {}) }}
+                        className={"tl-day-cell" + (todayCol ? " is-today" : "")} />
+                    );
+                  })}
+                </div>
                 {visible && (
                   <div onClick={() => onOpen(m.id)} title={`${m.title}（${STATUS_LABEL[m.status]}）`}
                     className="absolute top-2 h-6 rounded-md cursor-pointer flex items-center px-2 text-[10px] text-white truncate shadow-sm"
-                    style={{ left, width, background: STATUS_BAR_COLOR[m.status] }}>
+                    style={{ left, width, background: barColor, zIndex: 2 }}>
                     {m.title}
                   </div>
                 )}
@@ -1392,7 +1468,7 @@ function GanttView({ missions, onOpen }) {
           {rows.length === 0 && <p className="text-center text-slate-400 text-sm py-8">目前沒有符合條件的任務</p>}
         </div>
       </div>
-      <p className="text-[11px] text-slate-400 mt-2">＊長條左端＝任務建立時間，右端＝截止時間（若無截止時間則顯示為一天的短區塊）。</p>
+      <p className="text-[11px] text-slate-400 mt-2">＊長條左端＝任務建立時間，右端＝截止時間（若無截止時間則顯示為一天的短區塊）；顏色依緊急度分數由青綠（不急）到珊瑚紅（緊急）漸變。</p>
     </div>
   );
 }
@@ -1727,21 +1803,46 @@ function SettingsView({ profile, onProfileChange }) {
     }
   }
 
-  const relationFilterDisplay = profile.relation_filter_display || "logo";
+  const relationFilterDisplayTop = profile.relation_filter_display_top || "text";
+  const relationFilterDisplayList = profile.relation_filter_display_list || "logo";
+  const dueDateDisplayDetail = profile.due_date_display_detail || "raw";
+  const dueDateDisplayList = profile.due_date_display_list || "raw";
+  const dueDateColorOverride = profile.due_date_color_override || false;
   const [editingOtherDisplay, setEditingOtherDisplay] = useState(false);
-  const [relationFilterDisplayDraft, setRelationFilterDisplayDraft] = useState(relationFilterDisplay);
+  const [relationFilterDisplayTopDraft, setRelationFilterDisplayTopDraft] = useState(relationFilterDisplayTop);
+  const [relationFilterDisplayListDraft, setRelationFilterDisplayListDraft] = useState(relationFilterDisplayList);
+  const [dueDateDisplayDetailDraft, setDueDateDisplayDetailDraft] = useState(dueDateDisplayDetail);
+  const [dueDateDisplayListDraft, setDueDateDisplayListDraft] = useState(dueDateDisplayList);
+  const [dueDateColorOverrideDraft, setDueDateColorOverrideDraft] = useState(dueDateColorOverride);
   const [savingOtherDisplay, setSavingOtherDisplay] = useState(false);
 
   function startEditOtherDisplay() {
-    setRelationFilterDisplayDraft(relationFilterDisplay);
+    setRelationFilterDisplayTopDraft(relationFilterDisplayTop);
+    setRelationFilterDisplayListDraft(relationFilterDisplayList);
+    setDueDateDisplayDetailDraft(dueDateDisplayDetail);
+    setDueDateDisplayListDraft(dueDateDisplayList);
+    setDueDateColorOverrideDraft(dueDateColorOverride);
     setEditingOtherDisplay(true);
   }
   async function saveOtherDisplay() {
     setSavingOtherDisplay(true);
-    const { error } = await sb.from("profiles").update({ relation_filter_display: relationFilterDisplayDraft }).eq("id", profile.id);
+    const { error } = await sb.from("profiles").update({
+      relation_filter_display_top: relationFilterDisplayTopDraft,
+      relation_filter_display_list: relationFilterDisplayListDraft,
+      due_date_display_detail: dueDateDisplayDetailDraft,
+      due_date_display_list: dueDateDisplayListDraft,
+      due_date_color_override: dueDateColorOverrideDraft,
+    }).eq("id", profile.id);
     setSavingOtherDisplay(false);
     if (!error) {
-      onProfileChange({ ...profile, relation_filter_display: relationFilterDisplayDraft });
+      onProfileChange({
+        ...profile,
+        relation_filter_display_top: relationFilterDisplayTopDraft,
+        relation_filter_display_list: relationFilterDisplayListDraft,
+        due_date_display_detail: dueDateDisplayDetailDraft,
+        due_date_display_list: dueDateDisplayListDraft,
+        due_date_color_override: dueDateColorOverrideDraft,
+      });
       setEditingOtherDisplay(false);
     } else {
       setMsg({ type: "err", text: error.message });
@@ -2086,19 +2187,64 @@ function SettingsView({ profile, onProfileChange }) {
               <h4 className="text-sm font-semibold text-slate-700">其他顯示設定</h4>
               {!editingOtherDisplay && <button onClick={startEditOtherDisplay} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
             </div>
-            <div className="flex justify-between items-center text-xs">
-              <label className="text-slate-500">指派關係篩選呈現方式：</label>
-              {editingOtherDisplay ? (
-                <select value={relationFilterDisplayDraft} onChange={e => setRelationFilterDisplayDraft(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
-                  <option value="logo">logo顯示</option>
-                  <option value="text">字樣顯示</option>
-                </select>
-              ) : (
-                <span className="font-medium">{relationFilterDisplay === "text" ? "字樣顯示" : "logo顯示"}</span>
-              )}
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <label className="text-slate-500">指派關係篩選呈現方式(上方核選區)：</label>
+                {editingOtherDisplay ? (
+                  <select value={relationFilterDisplayTopDraft} onChange={e => setRelationFilterDisplayTopDraft(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    <option value="logo">logo顯示</option>
+                    <option value="text">字樣顯示</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{relationFilterDisplayTop === "text" ? "字樣顯示" : "logo顯示"}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-500">指派關係篩選呈現方式(列表內)：</label>
+                {editingOtherDisplay ? (
+                  <select value={relationFilterDisplayListDraft} onChange={e => setRelationFilterDisplayListDraft(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    <option value="logo">logo顯示</option>
+                    <option value="text">字樣顯示</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{relationFilterDisplayList === "text" ? "字樣顯示" : "logo顯示"}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-500">截止時間顯示設定(任務內)：</label>
+                {editingOtherDisplay ? (
+                  <select value={dueDateDisplayDetailDraft} onChange={e => setDueDateDisplayDetailDraft(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    <option value="raw">原始設定之截止時間</option>
+                    <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
+                    <option value="remaining_only">剩餘天數提示</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayDetail]}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-500">截止時間顯示設定(列表內)：</label>
+                {editingOtherDisplay ? (
+                  <select value={dueDateDisplayListDraft} onChange={e => setDueDateDisplayListDraft(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    <option value="raw">原始設定之截止時間</option>
+                    <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
+                    <option value="remaining_only">剩餘天數提示</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayList]}</span>
+                )}
+              </div>
             </div>
-            <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。</p>
+            <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingOtherDisplay ? "text-slate-600" : "text-slate-400")}>
+              <input type="checkbox" disabled={!editingOtherDisplay} checked={editingOtherDisplay ? dueDateColorOverrideDraft : dueDateColorOverride}
+                onChange={e => setDueDateColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+              截止時間文字顯示覆蓋顏色
+            </label>
+            <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。上方核選區與任務列表內可以各自獨立設定。截止時間的三種顯示模式、以及剩餘天數的顏色覆蓋，任務內頁與任務列表也可以分開設定。</p>
             {editingOtherDisplay && (
               <div className="flex gap-2 mt-3">
                 <button onClick={saveOtherDisplay} disabled={savingOtherDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingOtherDisplay ? "儲存中…" : "儲存"}</button>
@@ -2743,7 +2889,7 @@ function Dashboard({ session, profile, setProfile }) {
         )}
 
         {tab === "list" && (
-          <RelationFilterBar options={RELATION_FILTERS_PERSONAL} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display} />
+          <RelationFilterBar options={RELATION_FILTERS_PERSONAL} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display_top} />
         )}
 
         {tab === "list" && personalViewMode === "list" && (
@@ -2787,26 +2933,26 @@ function Dashboard({ session, profile, setProfile }) {
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
               </section>
             )}
           </div>
@@ -2912,26 +3058,26 @@ function Dashboard({ session, profile, setProfile }) {
               />
             )}
 
-            <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display} />
+            <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display_top} />
 
             {projectViewMode === "list" && (
               <>
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display} />
+                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
                   </section>
                 )}
               </>
@@ -3002,7 +3148,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
