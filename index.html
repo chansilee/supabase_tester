@@ -2839,6 +2839,15 @@ function Dashboard({ session, profile, setProfile }) {
               </div>
             )}
           </div>
+          <span
+            className="text-xs font-medium px-2 py-0.5 rounded-full"
+            style={{
+              background: profile.member_role === "admin" ? "#fce7f3" : profile.member_role === "vip" ? "#fef3c7" : "#f1f5f9",
+              color: profile.member_role === "admin" ? "#be185d" : profile.member_role === "vip" ? "#92400e" : "#64748b",
+            }}
+          >
+            {profile.member_role || "free"}
+          </span>
           <span className="text-sm text-slate-500">{profile.display_name}</span>
           <button onClick={() => sb.auth.signOut()} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">登出</button>
         </div>
