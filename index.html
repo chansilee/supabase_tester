@@ -2668,9 +2668,26 @@ const MEMBER_ROLE_LIMITS = {
   },
 };
 
-function MemberRoleModal({ role, onClose }) {
+function MemberRoleModal({ role, currentUserId, onClose }) {
   const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportMsg, setReportMsg] = useState(null);
   const current = MEMBER_ROLE_LIMITS[role] || MEMBER_ROLE_LIMITS.free;
+
+  async function submitReport() {
+    if (!reportText.trim()) return;
+    setReportBusy(true); setReportMsg(null);
+    const { error } = await sb.from("bug_reports").insert({ reporter_id: currentUserId, content: reportText.trim() });
+    setReportBusy(false);
+    if (error) {
+      setReportMsg({ type: "err", text: error.message });
+    } else {
+      setReportMsg({ type: "ok", text: "回報已送出，感謝您的協助！" });
+      setReportText("");
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -2680,7 +2697,7 @@ function MemberRoleModal({ role, onClose }) {
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
 
-        <div className="px-6 overflow-y-auto flex-1">
+        <div className="px-6 pb-6 overflow-y-auto flex-1">
           <p className="text-sm font-semibold mb-2">目前身分：{current.label}</p>
           <ul className="text-sm text-slate-600 space-y-1 mb-2" style={{ paddingLeft: 18, listStyleType: "disc" }}>
             {current.items.map((t, i) => <li key={i}>{t}</li>)}
@@ -2694,6 +2711,30 @@ function MemberRoleModal({ role, onClose }) {
               </ul>
             </div>
           )}
+
+          <div className="border-t border-slate-200 pt-4 mt-4">
+            {!reportOpen ? (
+              <button onClick={() => setReportOpen(true)} className="text-xs text-slate-500 underline">錯誤回報</button>
+            ) : (
+              <div>
+                <label className="text-xs text-slate-500">回報問題或建議給管理員</label>
+                <textarea rows={4} value={reportText} onChange={e => setReportText(e.target.value)}
+                  placeholder="請描述你遇到的問題或建議…" maxLength={2000}
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                {reportMsg && (
+                  <p className={"text-xs rounded-lg px-3 py-2 mt-2 " + (reportMsg.type === "err" ? "text-rose-600 bg-rose-50" : "text-emerald-600 bg-emerald-50")}>
+                    {reportMsg.text}
+                  </p>
+                )}
+                <div className="flex gap-2 mt-2">
+                  <button onClick={submitReport} disabled={reportBusy || !reportText.trim()} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">
+                    {reportBusy ? "送出中…" : "送出回報"}
+                  </button>
+                  <button onClick={() => { setReportOpen(false); setReportMsg(null); }} className="text-xs text-slate-500 px-4 py-2">收合</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {role === "free" && (
@@ -3244,6 +3285,7 @@ function Dashboard({ session, profile, setProfile }) {
       {showMemberRoleModal && (
         <MemberRoleModal
           role={profile.member_role || "free"}
+          currentUserId={profile.id}
           onClose={() => setShowMemberRoleModal(false)}
         />
       )}
