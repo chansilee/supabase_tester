@@ -86,6 +86,7 @@ table { border-collapse: collapse; width: 100%; }
 .text-amber-50 { color: #fffbeb; }
 .bg-amber-200 { background-color: #fde68a; }
 .text-amber-200 { color: #fde68a; }
+.bg-amber-500 { background-color: #f59e0b; }
 .bg-amber-800 { background-color: #92400e; }
 .text-amber-800 { color: #92400e; }
 .bg-white { background-color: #ffffff; }
@@ -245,10 +246,12 @@ table { border-collapse: collapse; width: 100%; }
 .w-full { width: 100%; }
 .min-h-screen { min-height: 100vh; }
 .max-w-sm { max-width: 24rem; }
+.max-w-md { max-width: 28rem; }
 .max-w-lg { max-width: 32rem; }
 .max-w-2xl { max-width: 42rem; }
 .max-w-6xl { max-width: 72rem; }
 .max-h-56 { max-height: 14rem; }
+.max-h-80 { max-height: 20rem; }
 .max-h-\[85vh\] { max-height: 85vh; }
 .text-xs { font-size: 0.75rem; line-height: 1rem; }
 .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
@@ -284,6 +287,7 @@ table { border-collapse: collapse; width: 100%; }
 .shadow-lg { box-shadow: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05); }
 .shadow-xl { box-shadow: 0 20px 25px rgba(0,0,0,0.1), 0 8px 10px rgba(0,0,0,0.04); }
 .flex { display: flex; }
+.flex-col { flex-direction: column; }
 .inline-block { display: inline-block; }
 .grid { display: grid; }
 .flex-1 { flex: 1 1 0%; }
@@ -403,7 +407,7 @@ function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, hideC
 function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleSections, onToggleSection, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">任務列表顯示設定</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -411,7 +415,7 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleSections, 
         <div className="grid md:grid-cols-2 gap-4">
           <div className="bg-slate-50 rounded-2xl p-4">
             <h3 className="font-bold mb-3 text-sm">顯示欄位設定</h3>
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {TASK_LIST_COLUMNS.map(c => (
                 <label key={c.key} className="flex items-center gap-2 text-sm bg-white rounded-lg px-3 py-2">
                   <input type="checkbox" checked={!!visibleColumns[c.key]} onChange={() => onToggleColumn(c.key)} className="w-4 h-4" />
@@ -1909,6 +1913,7 @@ function SettingsView({ profile, onProfileChange }) {
   async function respond(friendshipId, status) {
     const { error } = await sb.from("friendships").update({ status }).eq("id", friendshipId);
     if (!error) loadFriends();
+    else setMsg({ type: "err", text: error.message });
   }
 
   function removeFriend(friendshipId, friendName) {
@@ -2627,6 +2632,85 @@ function ViewModeToggle({ mode, onChange }) {
   );
 }
 
+// =====================================================================
+// 會員等級與限制說明彈窗
+// =====================================================================
+const MEMBER_ROLE_LIMITS = {
+  free: {
+    label: "免費會員（Free）",
+    items: [
+      "個人任務同時進行中上限：50 條",
+      "發起的專案，任務同時進行中上限：50 條",
+      "單一成員在同一專案內同時進行中上限：20 條",
+      "發起的專案，任務歷史總量上限：500 筆",
+      "帳號任務歷史總量上限：3000 筆",
+      "每日新增任務上限：100 筆",
+      "可建立專案數：2 個",
+      "單一任務下，自己的留言則數上限：10 則",
+    ],
+  },
+  vip: {
+    label: "VIP 會員",
+    items: [
+      "個人任務同時進行中上限：200 條",
+      "發起的專案，任務同時進行中上限：200 條",
+      "單一成員在同一專案內同時進行中上限：20 條",
+      "發起的專案，任務歷史總量上限：3000 筆",
+      "帳號任務歷史總量上限：3000 筆",
+      "每日新增任務：不限",
+      "可建立專案數：不限",
+      "單一任務下留言則數：不限",
+    ],
+  },
+  admin: {
+    label: "管理員（Admin）",
+    items: ["不受任何額度限制"],
+  },
+};
+
+function MemberRoleModal({ role, onClose }) {
+  const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
+  const current = MEMBER_ROLE_LIMITS[role] || MEMBER_ROLE_LIMITS.free;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+        <div className="flex justify-between items-center p-6 pb-4">
+          <h2 className="text-lg font-bold">會員等級與限制</h2>
+          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+
+        <div className="px-6 overflow-y-auto flex-1">
+          <p className="text-sm font-semibold mb-2">目前身分：{current.label}</p>
+          <ul className="text-sm text-slate-600 space-y-1 mb-2" style={{ paddingLeft: 18, listStyleType: "disc" }}>
+            {current.items.map((t, i) => <li key={i}>{t}</li>)}
+          </ul>
+
+          {role === "free" && (
+            <div className="border-t border-slate-200 pt-4 mt-4">
+              <p className="text-sm font-semibold mb-2 text-amber-700">升級 VIP 後可以：</p>
+              <ul className="text-sm text-slate-600 space-y-1" style={{ paddingLeft: 18, listStyleType: "disc" }}>
+                {MEMBER_ROLE_LIMITS.vip.items.map((t, i) => <li key={i}>{t}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        {role === "free" && (
+          <div className="p-6 pt-4 border-t border-slate-200 flex flex-col items-center">
+            {showUpgradeNotice && (
+              <p className="text-xs text-blue-600 bg-blue-50 rounded-lg px-3 py-2 mb-3">升級功能即將開放，敬請期待！</p>
+            )}
+            <button onClick={() => setShowUpgradeNotice(true)} className="bg-amber-500 text-white rounded-lg py-2.5 px-8 text-sm font-medium">
+              立即升級 VIP
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ session, profile, setProfile }) {
   const [tab, setTab] = useState("list"); // list(個人任務) | project | gantt | settings
   const [missions, setMissions] = useState([]);
@@ -2648,6 +2732,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [projects, setProjects] = useState([]);
   const [openProjectId, setOpenProjectId] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [showMemberRoleModal, setShowMemberRoleModal] = useState(false);
   const [projectDeleteErr, setProjectDeleteErr] = useState(null);
   const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
   const [showDeleteBlockedInfo, setShowDeleteBlockedInfo] = useState(false);
@@ -2855,7 +2940,8 @@ function Dashboard({ session, profile, setProfile }) {
               </div>
             )}
           </div>
-          <span
+          <button
+            onClick={() => setShowMemberRoleModal(true)}
             className="text-xs font-medium px-2 py-0.5 rounded-full"
             style={{
               background: profile.member_role === "admin" ? "#fce7f3" : profile.member_role === "vip" ? "#fef3c7" : "#f1f5f9",
@@ -2863,7 +2949,7 @@ function Dashboard({ session, profile, setProfile }) {
             }}
           >
             {profile.member_role || "free"}
-          </span>
+          </button>
           <span className="text-sm text-slate-500">{profile.display_name}</span>
           <button onClick={() => sb.auth.signOut()} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">登出</button>
         </div>
@@ -3153,6 +3239,12 @@ function Dashboard({ session, profile, setProfile }) {
           onCreated={loadProjects}
           friendProfiles={friendProfiles}
           currentUserName={profile.display_name}
+        />
+      )}
+      {showMemberRoleModal && (
+        <MemberRoleModal
+          role={profile.member_role || "free"}
+          onClose={() => setShowMemberRoleModal(false)}
         />
       )}
       {showEditProject && currentProject && (
