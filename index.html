@@ -2668,13 +2668,33 @@ const MEMBER_ROLE_LIMITS = {
   },
 };
 
+const BUG_REPORT_STATUS_LABEL = { open: "未處理", reviewed: "已查看", resolved: "已解決" };
+const BUG_REPORT_STATUS_COLOR = { open: "bg-rose-100 text-rose-700", reviewed: "bg-amber-100 text-amber-700", resolved: "bg-emerald-100 text-emerald-700" };
+
 function MemberRoleModal({ role, currentUserId, onClose }) {
   const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
   const [reportMsg, setReportMsg] = useState(null);
+  const [myReports, setMyReports] = useState([]);
   const current = MEMBER_ROLE_LIMITS[role] || MEMBER_ROLE_LIMITS.free;
+
+  const loadMyReports = useCallback(async () => {
+    const { data } = await sb.from("bug_reports").select("*").eq("reporter_id", currentUserId).order("created_at", { ascending: false });
+    setMyReports(data || []);
+  }, [currentUserId]);
+
+  useEffect(() => { loadMyReports(); }, [loadMyReports]);
+
+  // Realtime：如果 admin 在這段期間回覆了，畫面上的回報記錄會即時更新
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("my-bug-reports-" + currentUserId)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bug_reports", filter: `reporter_id=eq.${currentUserId}` }, () => loadMyReports())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [currentUserId, loadMyReports]);
 
   async function submitReport() {
     if (!reportText.trim()) return;
@@ -2686,6 +2706,7 @@ function MemberRoleModal({ role, currentUserId, onClose }) {
     } else {
       setReportMsg({ type: "ok", text: "回報已送出，感謝您的協助！" });
       setReportText("");
+      loadMyReports();
     }
   }
 
@@ -2712,6 +2733,15 @@ function MemberRoleModal({ role, currentUserId, onClose }) {
             </div>
           )}
 
+          {role === "admin" && (
+            <div className="border-t border-slate-200 pt-4 mt-4 flex justify-center">
+              <a href="admin.html" target="_blank" rel="noopener noreferrer"
+                className="bg-rose-600 text-white rounded-lg py-2.5 px-8 text-sm font-medium">
+                前往管理頁面
+              </a>
+            </div>
+          )}
+
           <div className="border-t border-slate-200 pt-4 mt-4">
             {!reportOpen ? (
               <button onClick={() => setReportOpen(true)} className="text-xs text-slate-500 underline">錯誤回報</button>
@@ -2735,6 +2765,28 @@ function MemberRoleModal({ role, currentUserId, onClose }) {
               </div>
             )}
           </div>
+
+          {myReports.length > 0 && (
+            <div className="border-t border-slate-200 pt-4 mt-4">
+              <p className="text-xs font-semibold text-slate-600 mb-2">我的回報記錄</p>
+              <div className="space-y-2">
+                {myReports.map(r => (
+                  <div key={r.id} className="bg-slate-50 rounded-lg px-3 py-2">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + BUG_REPORT_STATUS_COLOR[r.status]}>{BUG_REPORT_STATUS_LABEL[r.status]}</span>
+                      <span className="text-xs text-slate-400">{fmt(r.created_at)}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 whitespace-pre-wrap">{r.content}</p>
+                    {r.admin_reply && (
+                      <div className="mt-2 bg-blue-50 rounded-lg px-2 py-1.5">
+                        <p className="text-xs text-blue-700"><strong>管理員回覆：</strong>{r.admin_reply}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {role === "free" && (
