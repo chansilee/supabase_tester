@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>管理後台 — 任務雲 TaskCloud</title>
+<script>
+  // 全域錯誤攔截：只要有任何 JS 錯誤（含 CDN 載入失敗），就把錯誤內容直接顯示在畫面上，
+  // 避免「整個畫面空白、卻不知道發生什麼事」的情況。
+  window.addEventListener("error", function (e) {
+    var root = document.getElementById("root");
+    if (!root) return;
+    var msg = (e && e.message) ? e.message : "未知錯誤";
+    var src = (e && e.filename) ? e.filename : "";
+    root.innerHTML =
+      '<div style="max-width:640px;margin:60px auto;padding:24px;border:1px solid #fecaca;' +
+      'background:#fff1f2;border-radius:12px;font-family:sans-serif;color:#7f1d1d;">' +
+      '<h2 style="margin:0 0 8px;font-size:18px;">頁面發生錯誤，無法正常顯示</h2>' +
+      '<p style="font-size:14px;margin:0 0 8px;">錯誤訊息：' + msg + '</p>' +
+      (src ? '<p style="font-size:12px;color:#9f1239;word-break:break-all;">來源：' + src + '</p>' : '') +
+      '<p style="font-size:12px;color:#9f1239;">請打開瀏覽器開發者工具（F12 或 右鍵→檢查）的 Console 分頁，把紅字錯誤訊息複製給開發者。</p>' +
+      '</div>';
+  });
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" onerror="document.getElementById('root').innerHTML='<p style=\'padding:40px;font-family:sans-serif;color:#7f1d1d\'>無法載入 React（unpkg.com CDN），請檢查網路連線或防火牆/廣告攔截設定。</p>'"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" onerror="document.getElementById('root').innerHTML='<p style=\'padding:40px;font-family:sans-serif;color:#7f1d1d\'>無法載入 React DOM（unpkg.com CDN），請檢查網路連線或防火牆/廣告攔截設定。</p>'"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" onerror="document.getElementById('root').innerHTML='<p style=\'padding:40px;font-family:sans-serif;color:#7f1d1d\'>無法載入 Babel（unpkg.com CDN），請檢查網路連線或防火牆/廣告攔截設定。</p>'"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="document.getElementById('root').innerHTML='<p style=\'padding:40px;font-family:sans-serif;color:#7f1d1d\'>無法載入 Supabase 客戶端（cdn.jsdelivr.net CDN），請檢查網路連線或防火牆/廣告攔截設定。</p>'"></script>
+<style>
+
+*, *::before, *::after { box-sizing: border-box; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; text-align: inherit; }
+input, textarea, select { font: inherit; color: inherit; background: white; }
+a { color: inherit; }
+table { border-collapse: collapse; width: 100%; }
+
+.bg-slate-50 { background-color: #f8fafc; }
+.text-slate-50 { color: #f8fafc; }
+.bg-slate-100 { background-color: #f1f5f9; }
+.text-slate-100 { color: #f1f5f9; }
+.bg-slate-200 { background-color: #e2e8f0; }
+.text-slate-200 { color: #e2e8f0; }
+.bg-slate-300 { background-color: #cbd5e1; }
+.text-slate-300 { color: #cbd5e1; }
+.bg-slate-400 { background-color: #94a3b8; }
+.text-slate-400 { color: #94a3b8; }
+.bg-slate-500 { background-color: #64748b; }
+.text-slate-500 { color: #64748b; }
+.bg-slate-600 { background-color: #475569; }
+.text-slate-600 { color: #475569; }
+.bg-slate-700 { background-color: #334155; }
+.text-slate-700 { color: #334155; }
+.bg-slate-800 { background-color: #1e293b; }
+.text-slate-800 { color: #1e293b; }
+.bg-slate-900 { background-color: #0f172a; }
+.text-slate-900 { color: #0f172a; }
+.bg-blue-50 { background-color: #eff6ff; }
+.text-blue-50 { color: #eff6ff; }
+.bg-blue-100 { background-color: #dbeafe; }
+.text-blue-100 { color: #dbeafe; }
+.bg-blue-400 { background-color: #60a5fa; }
+.text-blue-400 { color: #60a5fa; }
+.bg-blue-600 { background-color: #2563eb; }
+.text-blue-600 { color: #2563eb; }
+.bg-blue-700 { background-color: #1d4ed8; }
+.text-blue-700 { color: #1d4ed8; }
+.bg-emerald-50 { background-color: #ecfdf5; }
+.text-emerald-50 { color: #ecfdf5; }
+.bg-emerald-100 { background-color: #d1fae5; }
+.text-emerald-100 { color: #d1fae5; }
+.bg-emerald-600 { background-color: #059669; }
+.text-emerald-600 { color: #059669; }
+.bg-emerald-700 { background-color: #047857; }
+.text-emerald-700 { color: #047857; }
+.bg-rose-50 { background-color: #fff1f2; }
+.text-rose-50 { color: #fff1f2; }
+.bg-rose-100 { background-color: #ffe4e6; }
+.text-rose-100 { color: #ffe4e6; }
+.bg-rose-500 { background-color: #f43f5e; }
+.text-rose-500 { color: #f43f5e; }
+.bg-rose-600 { background-color: #e11d48; }
+.text-rose-600 { color: #e11d48; }
+.bg-rose-700 { background-color: #be123c; }
+.text-rose-700 { color: #be123c; }
+.bg-amber-50 { background-color: #fffbeb; }
+.text-amber-50 { color: #fffbeb; }
+.bg-amber-200 { background-color: #fde68a; }
+.text-amber-200 { color: #fde68a; }
+.bg-amber-500 { background-color: #f59e0b; }
+.bg-amber-800 { background-color: #92400e; }
+.text-amber-800 { color: #92400e; }
+.bg-white { background-color: #ffffff; }
+.text-white { color: #ffffff; }
+.bg-black\/40 { background-color: rgba(0,0,0,0.4); }
+.border-amber-200 { border-color: #fde68a; }
+.border-slate-100 { border-color: #f1f5f9; }
+.border-slate-200 { border-color: #e2e8f0; }
+.border-slate-300 { border-color: #cbd5e1; }
+.hover\:bg-slate-100:hover { background-color: #f1f5f9; }
+.hover\:bg-slate-50:hover { background-color: #f8fafc; }
+.focus\:outline-none:focus { outline: none; }
+.focus\:ring-2:focus { box-shadow: 0 0 0 2px #60a5fa; }
+.focus\:ring-blue-400:focus { box-shadow: 0 0 0 2px #60a5fa; }
+.disabled\:opacity-50:disabled { opacity: 0.5; }
+.p-0\.5 { padding: 0.125rem; }
+.px-0\.5 { padding-left: 0.125rem; padding-right: 0.125rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.pt-0\.5 { padding-top: 0.125rem; }
+.pr-0\.5 { padding-right: 0.125rem; }
+.pl-0\.5 { padding-left: 0.125rem; }
+.pb-0\.5 { padding-bottom: 0.125rem; }
+.mt-0\.5 { margin-top: 0.125rem; }
+.mb-0\.5 { margin-bottom: 0.125rem; }
+.ml-0\.5 { margin-left: 0.125rem; }
+.mr-0\.5 { margin-right: 0.125rem; }
+.gap-0\.5 { gap: 0.125rem; }
+.p-1 { padding: 0.25rem; }
+.px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+.py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.pt-1 { padding-top: 0.25rem; }
+.pr-1 { padding-right: 0.25rem; }
+.pl-1 { padding-left: 0.25rem; }
+.pb-1 { padding-bottom: 0.25rem; }
+.mt-1 { margin-top: 0.25rem; }
+.mb-1 { margin-bottom: 0.25rem; }
+.ml-1 { margin-left: 0.25rem; }
+.mr-1 { margin-right: 0.25rem; }
+.gap-1 { gap: 0.25rem; }
+.p-1\.5 { padding: 0.375rem; }
+.px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
+.py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+.pt-1\.5 { padding-top: 0.375rem; }
+.pr-1\.5 { padding-right: 0.375rem; }
+.pl-1\.5 { padding-left: 0.375rem; }
+.pb-1\.5 { padding-bottom: 0.375rem; }
+.mt-1\.5 { margin-top: 0.375rem; }
+.mb-1\.5 { margin-bottom: 0.375rem; }
+.ml-1\.5 { margin-left: 0.375rem; }
+.mr-1\.5 { margin-right: 0.375rem; }
+.gap-1\.5 { gap: 0.375rem; }
+.p-2 { padding: 0.5rem; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.pt-2 { padding-top: 0.5rem; }
+.pr-2 { padding-right: 0.5rem; }
+.pl-2 { padding-left: 0.5rem; }
+.pb-2 { padding-bottom: 0.5rem; }
+.mt-2 { margin-top: 0.5rem; }
+.mb-2 { margin-bottom: 0.5rem; }
+.ml-2 { margin-left: 0.5rem; }
+.mr-2 { margin-right: 0.5rem; }
+.gap-2 { gap: 0.5rem; }
+.p-2\.5 { padding: 0.625rem; }
+.px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+.py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+.pt-2\.5 { padding-top: 0.625rem; }
+.pr-2\.5 { padding-right: 0.625rem; }
+.pl-2\.5 { padding-left: 0.625rem; }
+.pb-2\.5 { padding-bottom: 0.625rem; }
+.mt-2\.5 { margin-top: 0.625rem; }
+.mb-2\.5 { margin-bottom: 0.625rem; }
+.ml-2\.5 { margin-left: 0.625rem; }
+.mr-2\.5 { margin-right: 0.625rem; }
+.gap-2\.5 { gap: 0.625rem; }
+.p-3 { padding: 0.75rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.pt-3 { padding-top: 0.75rem; }
+.pr-3 { padding-right: 0.75rem; }
+.pl-3 { padding-left: 0.75rem; }
+.pb-3 { padding-bottom: 0.75rem; }
+.mt-3 { margin-top: 0.75rem; }
+.mb-3 { margin-bottom: 0.75rem; }
+.ml-3 { margin-left: 0.75rem; }
+.mr-3 { margin-right: 0.75rem; }
+.gap-3 { gap: 0.75rem; }
+.p-4 { padding: 1rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+.pt-4 { padding-top: 1rem; }
+.pr-4 { padding-right: 1rem; }
+.pl-4 { padding-left: 1rem; }
+.pb-4 { padding-bottom: 1rem; }
+.mt-4 { margin-top: 1rem; }
+.mb-4 { margin-bottom: 1rem; }
+.ml-4 { margin-left: 1rem; }
+.mr-4 { margin-right: 1rem; }
+.gap-4 { gap: 1rem; }
+.p-5 { padding: 1.25rem; }
+.px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+.py-5 { padding-top: 1.25rem; padding-bottom: 1.25rem; }
+.pt-5 { padding-top: 1.25rem; }
+.pr-5 { padding-right: 1.25rem; }
+.pl-5 { padding-left: 1.25rem; }
+.pb-5 { padding-bottom: 1.25rem; }
+.mt-5 { margin-top: 1.25rem; }
+.mb-5 { margin-bottom: 1.25rem; }
+.ml-5 { margin-left: 1.25rem; }
+.mr-5 { margin-right: 1.25rem; }
+.gap-5 { gap: 1.25rem; }
+.p-6 { padding: 1.5rem; }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+.pt-6 { padding-top: 1.5rem; }
+.pr-6 { padding-right: 1.5rem; }
+.pl-6 { padding-left: 1.5rem; }
+.pb-6 { padding-bottom: 1.5rem; }
+.mt-6 { margin-top: 1.5rem; }
+.mb-6 { margin-bottom: 1.5rem; }
+.ml-6 { margin-left: 1.5rem; }
+.mr-6 { margin-right: 1.5rem; }
+.gap-6 { gap: 1.5rem; }
+.p-8 { padding: 2rem; }
+.px-8 { padding-left: 2rem; padding-right: 2rem; }
+.py-8 { padding-top: 2rem; padding-bottom: 2rem; }
+.pt-8 { padding-top: 2rem; }
+.pr-8 { padding-right: 2rem; }
+.pl-8 { padding-left: 2rem; }
+.pb-8 { padding-bottom: 2rem; }
+.mt-8 { margin-top: 2rem; }
+.mb-8 { margin-bottom: 2rem; }
+.ml-8 { margin-left: 2rem; }
+.mr-8 { margin-right: 2rem; }
+.gap-8 { gap: 2rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.space-y-2 > * + * { margin-top: 0.5rem; }
+.space-y-3 > * + * { margin-top: 0.75rem; }
+.space-y-6 > * + * { margin-top: 1.5rem; }
+.space-y-8 > * + * { margin-top: 2rem; }
+.-top-0\.5 { top: -0.125rem; }
+.-right-0\.5 { right: -0.125rem; }
+.w-4 { width: 1rem; }
+.h-4 { height: 1rem; }
+.w-5 { width: 1.25rem; }
+.h-5 { height: 1.25rem; }
+.w-6 { width: 1.5rem; }
+.h-6 { height: 1.5rem; }
+.w-7 { width: 1.75rem; }
+.h-7 { height: 1.75rem; }
+.w-72 { width: 18rem; }
+.w-8 { width: 2rem; }
+.w-9 { width: 2.25rem; }
+.h-9 { height: 2.25rem; }
+.shrink-0 { flex-shrink: 0; }
+.h-72 { height: 18rem; }
+.w-full { width: 100%; }
+.min-h-screen { min-height: 100vh; }
+.max-w-sm { max-width: 24rem; }
+.max-w-md { max-width: 28rem; }
+.max-w-lg { max-width: 32rem; }
+.max-w-2xl { max-width: 42rem; }
+.max-w-6xl { max-width: 72rem; }
+.max-h-56 { max-height: 14rem; }
+.max-h-80 { max-height: 20rem; }
+.max-h-\[85vh\] { max-height: 85vh; }
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.text-\[10px\] { font-size: 10px; }
+.text-\[11px\] { font-size: 11px; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.underline { text-decoration: underline; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whitespace-nowrap { white-space: nowrap; }
+.whitespace-pre-wrap { white-space: pre-wrap; }
+.border { border-width: 1px; border-style: solid; border-color: #e2e8f0; }
+.border-2 { border-width: 2px; border-style: solid; }
+.border-slate-900 { border-color: #0f172a; }
+.opacity-40 { opacity: 0.4; }
+.w-10 { width: 2.5rem; }
+.border-t { border-top-width: 1px; border-top-style: solid; border-color: #e2e8f0; }
+.border-b { border-bottom-width: 1px; border-bottom-style: solid; border-color: #e2e8f0; }
+.border-l { border-left-width: 1px; border-left-style: solid; border-color: #e2e8f0; }
+.rounded-md { border-radius: 0.375rem; }
+.rounded-lg { border-radius: 0.5rem; }
+.rounded-xl { border-radius: 0.75rem; }
+.rounded-2xl { border-radius: 1rem; }
+.rounded-full { border-radius: 9999px; }
+.shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); }
+.shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.shadow-lg { box-shadow: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05); }
+.shadow-xl { box-shadow: 0 20px 25px rgba(0,0,0,0.1), 0 8px 10px rgba(0,0,0,0.04); }
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.inline-block { display: inline-block; }
+.grid { display: grid; }
+.flex-1 { flex: 1 1 0%; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.justify-center { justify-content: center; }
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 768px) { .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed { position: fixed; }
+.sticky { position: sticky; }
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.top-0 { top: 0; }
+.top-2 { top: 0.5rem; }
+.right-0 { right: 0; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-50 { z-index: 50; }
+.overflow-x-auto { overflow-x: auto; }
+.overflow-y-auto { overflow-y: auto; }
+.cursor-pointer { cursor: pointer; }
+  body { font-family: -apple-system, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  :root { --blue: #2563eb; }
+  .tl-day-col { position: relative; }
+  .tl-day-cell { position: relative; }
+  .tl-day-col.is-today { background: rgba(111,163,224,.15); color: var(--blue); font-weight: 700; }
+  .tl-day-cell.is-today { background: rgba(111,163,224,.08); }
+  .tl-day-col.is-today::after {
+    content: ''; position: absolute; left: var(--now-line-left, 50%); bottom: 0; height: 6px; width: 0;
+    border-left: 1.5px dashed rgba(30,30,30,0.35); transform: translateX(-50%); pointer-events: none;
+  }
+  .tl-day-cell.is-today::after {
+    content: ''; position: absolute; left: var(--now-line-left, 50%); top: 0; bottom: 0; width: 0;
+    border-left: 1.5px dashed rgba(30,30,30,0.35); transform: translateX(-50%); z-index: 1; pointer-events: none;
+  }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+<div id="root"></div>
+
+<script type="text/plain" id="app-source">
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+// =====================================================================
+// 設定區：請填入跟 task-cloud.html 完全一樣的 Supabase 專案設定
+// =====================================================================
+const SUPABASE_URL = "https://stklkxnzxcecnmsdhxwk.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0a2xreG56eGNlY25tc2RoeHdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MTkyMjIsImV4cCI6MjEwMDI5NTIyMn0.ZG4h0Fb1KpYsUEKrU-aBIysqtQX9lV6mAvuDzqcyTxI";
+
+
+const sb = (SUPABASE_URL.startsWith("http"))
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+const Icon = {
+  Bell: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M9.7 21a2 2 0 0 0 4.6 0"/></svg>),
+  Plus: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M12 5v14M5 12h14"/></svg>),
+  Close: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M18 6 6 18M6 6l12 12"/></svg>),
+  Search: (p) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...p}><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>),
+  Settings: (p) => (<svg viewBox="28 74 155 149" fill="currentColor" {...p}><path d="m 130.29847,217.05188 c -6.64363,-1.74218 -11.95968,-6.3444 -14.46827,-12.52549 l -0.77173,-1.90152 -38.664439,-0.006 -38.664443,-0.006 -1.411111,-0.6628 c -1.65939,-0.77941 -2.167126,-1.2982 -2.941617,-3.00565 -1.0306,-2.27207 -0.545692,-4.77393 1.278447,-6.5961 1.848286,-1.84629 -1.148751,-1.71673 41.631678,-1.79978 l 38.839615,-0.0754 0.49153,-1.3357 c 1.85006,-5.02751 6.02561,-9.39411 11.25928,-11.77444 9.5675,-4.35141 20.84157,-0.59021 26.37075,8.79768 0.47405,0.80487 1.08751,2.09863 1.36326,2.87502 l 0.50137,1.41162 8.7595,0.0883 c 9.56528,0.0965 9.88345,0.14637 11.55157,1.8127 1.87839,1.87635 2.31802,4.35412 1.1963,6.74229 -0.77941,1.65939 -1.2982,2.16712 -3.00565,2.94162 -1.1814,0.53587 -1.8291,0.57417 -9.8082,0.57996 l -8.54327,0.006 -0.30975,0.77611 c -2.73186,6.8449 -7.08545,11.04379 -13.8646,13.37189 -2.51392,0.86333 -8.03092,1.00954 -10.79022,0.28596 z m 8.7953,-12.48578 c 6.71792,-3.20844 6.63871,-12.79508 -0.1331,-16.10807 -0.93133,-0.45564 -1.96816,-0.67882 -3.49337,-0.75197 -1.8792,-0.0901 -2.38819,-0.004 -3.81,0.6449 -2.13981,0.97656 -3.81324,2.64468 -4.75233,4.73726 -1.86085,4.14652 0.0361,9.43249 4.13552,11.52385 2.53133,1.29139 5.28601,1.27567 8.05328,-0.046 z M 72.584031,169.30874 c -7.002411,-0.82159 -13.17507,-5.17147 -16.20367,-11.41876 -0.678391,-1.39935 -1.306602,-2.76653 -1.396026,-3.03817 -0.150106,-0.45597 -0.829549,-0.49437 -8.849779,-0.50009 -9.749769,-0.007 -10.101652,-0.0681 -11.849216,-2.05845 -1.954053,-2.22555 -1.954053,-5.49849 0,-7.72404 1.747564,-1.99036 2.099447,-2.05149 11.849216,-2.05845 8.02023,-0.006 8.699673,-0.0441 8.849779,-0.50008 0.08942,-0.27164 0.717635,-1.63882 1.396026,-3.03818 2.635963,-5.43736 7.911286,-9.63179 13.880987,-11.03682 2.558659,-0.60221 7.024645,-0.58598 9.487154,0.0345 6.564125,1.65389 12.157485,6.5177 14.604894,12.69996 l 0.670351,1.69333 39.086253,0.14112 c 43.55066,0.15722 39.84574,-0.0288 41.71007,2.09453 1.91633,2.18258 1.91633,5.48168 0,7.66426 -1.86433,2.12336 1.84059,1.93731 -41.71007,2.09454 l -39.086253,0.14111 -0.670351,1.69333 c -3.435953,8.67936 -12.588025,14.19363 -21.769365,13.11638 z m 6.329038,-12.81154 c 6.591383,-3.22486 6.555633,-12.91548 -0.05963,-16.16399 -1.365381,-0.67049 -1.959037,-0.79086 -3.870519,-0.7848 -2.951106,0.009 -4.712125,0.7679 -6.614135,2.849 -3.146802,3.4431 -3.190424,8.52944 -0.102606,11.96384 2.027564,2.25514 4.193434,3.1566 7.199705,2.99662 1.328595,-0.0707 2.357759,-0.32766 3.447185,-0.86067 z m 53.643181,-35.33591 c -0.31044,-0.0611 -1.26294,-0.25061 -2.11667,-0.42107 -1.94345,-0.38803 -5.05448,-1.80286 -7.26488,-3.30391 -3.06668,-2.08254 -6.2592,-6.18517 -7.55657,-9.71076 l -0.49153,-1.33571 -38.839615,-0.0754 c -42.780429,-0.0831 -39.783392,0.0465 -41.631678,-1.79979 -1.824139,-1.82217 -2.309047,-4.32403 -1.278447,-6.596099 0.774491,-1.707449 1.282227,-2.226238 2.941617,-3.005652 l 1.411111,-0.662798 38.664443,-0.0062 38.664439,-0.0062 0.77173,-1.901523 c 2.58715,-6.37467 8.23979,-11.123762 15.04119,-12.636929 2.90991,-0.647395 7.69157,-0.459374 10.2173,0.401759 6.75849,2.304266 11.13214,6.521124 13.8646,13.367537 l 0.30975,0.776111 8.54327,0.0028 c 8.37428,0.0027 8.57119,0.01587 9.95438,0.665555 1.65939,0.779414 2.16713,1.298203 2.94162,3.005652 1.0306,2.272067 0.54569,4.773927 -1.27845,6.596097 -1.66887,1.66707 -1.98304,1.71624 -11.58542,1.81292 l -8.79336,0.0885 -0.18783,0.75813 c -0.30536,1.2325 -1.80631,4.03043 -3.05333,5.69173 -3.99442,5.32143 -10.36827,8.51025 -16.84878,8.42937 -1.00894,-0.0126 -2.08844,-0.0729 -2.39889,-0.13404 z m 6.40442,-12.75528 c 4.55043,-2.2315 6.4166,-7.54214 4.21899,-12.006126 -3.34945,-6.803693 -12.83721,-6.775501 -16.17552,0.04806 -0.45564,0.93133 -0.67882,1.968159 -0.75197,3.493367 -0.0902,1.879629 -0.004,2.387869 0.64533,3.810009 0.97338,2.13164 2.42727,3.62472 4.52986,4.65196 1.51649,0.7409 1.92912,0.81816 3.95111,0.73976 1.65172,-0.064 2.61329,-0.26188 3.5822,-0.73703 z"/></svg>),
+  Trash: (p) => (<svg viewBox="37 71 136 155" fill="currentColor" {...p}><path d="m 68.099048,220.37488 c -2.030255,-0.39871 -4.732261,-1.82969 -6.357826,-3.36708 -1.576,-1.49051 -3.316765,-4.56011 -3.660463,-6.45471 -0.09527,-0.52516 -1.818699,-20.90866 -3.829846,-45.29667 -2.011148,-24.38801 -3.723009,-44.88158 -3.804136,-45.54128 l -0.147503,-1.19944 h 54.740316 54.74031 l -0.14751,1.19944 c -0.0811,0.6597 -1.79298,21.15327 -3.80413,45.54128 -2.01115,24.38801 -3.73458,44.77151 -3.82985,45.29667 -0.0953,0.52515 -0.6148,1.86786 -1.15451,2.98379 -1.68604,3.48613 -5.16593,6.11203 -9.08462,6.85519 -1.88099,0.35673 -71.839413,0.3404 -73.660232,-0.0172 z m 18.227444,-17.4132 c 0.457795,-0.32598 1.059276,-1.09591 1.336625,-1.71096 0.493799,-1.09505 0.45925,-1.84408 -1.663779,-36.07054 -1.709144,-27.55401 -2.260614,-35.14758 -2.605362,-35.87504 -0.602315,-1.27096 -1.885895,-2.10881 -3.437669,-2.24392 -1.756787,-0.15297 -3.08068,0.58539 -3.949526,2.20272 l -0.669471,1.2462 2.166975,34.99556 c 2.397778,38.72289 2.129072,36.35947 4.276919,37.61792 1.35582,0.79439 3.299499,0.72514 4.545288,-0.16194 z m 21.182238,-0.0111 c 1.88041,-1.33897 1.76419,1.13719 1.76419,-37.58601 0,-38.79055 0.12189,-36.2417 -1.79868,-37.61166 -1.23157,-0.87849 -3.63774,-0.87849 -4.8693,0 -1.93273,1.37863 -1.81312,-1.24268 -1.73137,37.94336 l 0.0738,35.36941 0.62602,0.87763 c 1.31171,1.83889 4.10235,2.31248 5.93535,1.00727 z m 20.78924,0.15657 c 2.14628,-1.22554 1.87927,1.1214 4.27301,-37.55817 2.11804,-34.22466 2.15258,-34.97555 1.6588,-36.07054 -1.02692,-2.2773 -3.48873,-3.07965 -5.74389,-1.87205 -2.30742,1.23558 -1.99989,-1.38468 -4.41494,37.61707 l -2.16698,34.99556 0.66948,1.2462 c 1.18026,2.19703 3.55801,2.87902 5.72452,1.64193 z m -80.63452,-93.4588 c -4.838496,-1.30717 -7.366395,-6.8756 -5.28233,-11.635861 0.669291,-1.528744 2.549595,-3.387884 4.196369,-4.149137 1.277065,-0.590348 1.679453,-0.608762 15.070431,-0.689646 l 13.758333,-0.0831 v -2.488932 c 0,-1.368912 0.129629,-3.172466 0.288066,-4.007896 0.961237,-5.068585 5.054759,-9.162107 10.123344,-10.123344 2.046928,-0.388192 36.396917,-0.388192 38.443847,0 5.06858,0.961237 9.1621,5.054759 10.12334,10.123344 0.15844,0.83543 0.28807,2.638984 0.28807,4.007896 v 2.488932 l 13.75833,0.0831 c 13.39098,0.08088 13.79337,0.0993 15.07043,0.689646 1.68641,0.779576 3.52284,2.621987 4.27632,4.290248 0.82102,1.81781 0.82102,5.03972 0,6.85753 -0.75348,1.66826 -2.58991,3.51067 -4.27632,4.29025 l -1.3121,0.60654 -56.58555,0.0532 c -45.611211,0.0429 -56.848351,-0.0177 -57.94058,-0.31282 z m 78.49793,-19.42543 c -0.0814,-2.445841 -0.19349,-3.029113 -0.72568,-3.775205 -1.32333,-1.855202 -0.68244,-1.798683 -20.39611,-1.798683 -19.713682,0 -19.072789,-0.05652 -20.396118,1.798683 -0.532192,0.746092 -0.644312,1.329364 -0.725686,3.775205 l -0.09625,2.892778 h 21.218054 21.21804 z"/></svg>),
+  Edit: (p) => (<svg viewBox="32 87 147 147" fill="currentColor" {...p}><path d="m 55.457543,229.09452 c -7.566804,-1.63039 -14.282024,-7.3021 -17.227173,-14.55016 -1.738627,-4.27878 -1.688866,-2.75583 -1.596658,-48.86646 l 0.0846,-42.30843 0.705806,-2.11542 c 2.736083,-8.20052 8.936504,-14.16649 17.168452,-16.51929 2.335579,-0.66754 2.69885,-0.68004 22.826813,-0.78511 14.735222,-0.0769 20.813247,-0.01 21.740368,0.23976 4.331059,1.16623 5.026159,6.98443 1.059309,8.86682 -0.923776,0.43836 -3.161987,0.49164 -20.653629,0.49164 -12.785021,0 -20.242117,0.11407 -21.410748,0.32753 -5.16865,0.94406 -9.801581,5.01768 -11.344432,9.97486 -0.550118,1.76754 -0.572542,3.45224 -0.572542,43.01535 0,33.71883 0.07392,41.41707 0.408187,42.50816 1.488601,4.85905 4.913208,8.43 9.640629,10.0526 1.887547,0.64786 1.902033,0.64812 41.476811,0.73765 26.284644,0.0595 40.389844,-0.0164 41.972884,-0.22587 6.18302,-0.81797 11.15434,-5.38305 12.43296,-11.41697 0.35093,-1.6561 0.43453,-5.80822 0.43877,-21.79449 0.005,-17.58787 0.0589,-19.86174 0.49581,-20.78241 0.72138,-1.52019 2.0415,-2.33038 4.02272,-2.46884 1.97726,-0.13819 3.35581,0.60198 4.38537,2.35459 0.61009,1.03857 0.62074,1.41683 0.62074,22.0598 0,23.69871 0.0891,22.65998 -2.39843,27.95379 -2.30915,4.91411 -6.044,8.7452 -10.89851,11.17933 -5.23757,2.62621 -0.97237,2.41018 -48.8058,2.47197 -36.828201,0.0476 -42.73974,-0.006 -44.572312,-0.4004 z m 18.875805,-31.99836 c -1.855889,-0.57211 -3.850599,-2.35102 -4.713062,-4.20317 -0.940611,-2.01998 -0.924462,-3.49798 0.16528,-15.12696 0.686584,-7.32675 1.023112,-9.76344 1.544265,-11.18152 0.640563,-1.74299 1.552066,-2.70269 23.536258,-24.78065 12.578441,-12.63209 25.032151,-25.17729 27.674911,-27.87823 2.64276,-2.70094 4.94901,-4.9108 5.125,-4.9108 0.40853,0 29.48025,29.06147 29.48025,29.46985 0,0.50267 -54.44605,54.71566 -55.77117,55.53243 -2.157436,1.32979 -4.261379,1.71623 -14.381492,2.64147 -11.154021,1.01977 -10.810209,1.00789 -12.66024,0.43758 z m 75.014572,-80.30358 -14.9001,-14.91499 3.57056,-3.467245 c 5.37047,-5.215089 8.56426,-6.863536 13.83931,-7.143054 3.22958,-0.171132 5.93942,0.375095 8.89547,1.793076 1.63264,0.783159 2.81478,1.784738 6.67756,5.657664 3.90632,3.916579 4.85779,5.049059 5.67179,6.750789 1.46221,3.05689 1.96323,5.5832 1.78204,8.98566 -0.28255,5.30589 -1.80727,8.20854 -7.2295,13.76298 l -3.40703,3.49012 z"/></svg>),
+  Show: (p) => (<svg viewBox="38 107 137 87" fill="currentColor" {...p}><path d="m 98.550988,188.24464 c -22.666278,-2.82602 -41.974262,-15.21933 -53.987299,-34.6531 -0.974547,-1.57655 -1.147358,-2.06858 -1.161597,-3.30729 -0.01504,-1.30829 0.127794,-1.69306 1.414755,-3.81114 10.559292,-17.37846 29.135606,-29.96271 49.445981,-33.49645 9.270482,-1.61294 20.120762,-1.33101 28.762112,0.74734 10.43313,2.50931 19.74607,6.89361 27.85195,13.11201 6.98462,5.35823 13.55052,12.59054 17.75898,19.56142 1.7377,2.87833 1.91212,3.86287 1.02378,5.77896 -1.82189,3.92969 -7.22744,10.9317 -12.1416,15.72746 -11.04349,10.77744 -24.61304,17.55027 -40.04935,19.98944 -4.55058,0.71906 -14.48814,0.90363 -18.917712,0.35135 z m 14.871682,-12.38882 c 9.23083,-2.38847 16.42685,-9.58733 18.93622,-18.94367 0.58938,-2.19756 0.6777,-3.06131 0.6777,-6.6279 0,-3.56659 -0.0883,-4.43035 -0.6777,-6.6279 -3.8123,-14.21442 -18.03989,-22.57721 -32.23372,-18.94656 -9.229179,2.36074 -16.467276,9.57499 -18.967337,18.90486 -0.601237,2.24373 -0.688278,3.08719 -0.688278,6.6696 0,3.58241 0.08704,4.42587 0.688278,6.6696 2.007554,7.4919 6.919926,13.50315 13.953572,17.07493 5.288415,2.68553 12.292525,3.38438 18.311265,1.82704 z m -10.24147,-7.95443 c -6.62655,-1.53475 -11.450248,-5.87575 -13.549038,-12.19318 -0.610821,-1.8386 -0.703202,-2.55116 -0.703202,-5.42396 0,-2.87281 0.09238,-3.58536 0.703202,-5.42396 0.951583,-2.8643 2.355764,-5.14987 4.451423,-7.24553 2.095659,-2.09566 4.381227,-3.49984 7.245525,-4.45142 1.8386,-0.61082 2.55115,-0.7032 5.42396,-0.7032 2.87281,0 3.58536,0.0924 5.42396,0.7032 2.8643,0.95158 5.14987,2.35576 7.24553,4.45142 2.09566,2.09566 3.49984,4.38123 4.45142,7.24553 0.61082,1.8386 0.7032,2.55115 0.7032,5.42396 0,2.8728 -0.0924,3.58536 -0.7032,5.42396 -2.44494,7.35936 -8.78017,12.15389 -16.45945,12.45657 -1.68426,0.0664 -3.22278,-0.0293 -4.23333,-0.26339 z"/></svg>),
+  Hidden: (p) => (<svg viewBox="32 99 146 107" fill="currentColor" {...p}><path d="m 142.875,199.87216 c -0.55301,-0.2369 -3.54038,-3.00615 -7.41611,-6.87464 l -6.49007,-6.47793 -1.57972,0.54559 c -7.16147,2.47337 -15.37174,3.59677 -24.54475,3.35845 -11.603694,-0.30149 -21.344078,-2.84109 -32.099218,-8.36922 -12.268207,-6.30583 -23.583067,-16.35465 -31.410999,-27.89636 -2.735123,-4.03273 -2.716362,-7.2579 0.06683,-11.48807 4.51882,-6.86815 12.041424,-14.76645 19.284635,-20.24775 l 3.519965,-2.66374 -4.089029,-4.1183 c -2.248966,-2.26507 -4.279434,-4.49935 -4.512152,-4.96507 -0.772747,-1.54642 -0.376935,-4.10572 0.843738,-5.45557 1.184338,-1.30966 3.763579,-1.88176 5.528935,-1.22636 1.120243,0.4159 88.645755,87.95719 89.268835,89.28493 1.86149,3.96671 -2.34374,8.31923 -6.37089,6.59404 z m -32.01953,-23.53855 c 2.04156,-0.4631 5.82578,-1.73374 5.82578,-1.95615 0,-0.0858 -1.75617,-1.89932 -3.9026,-4.03009 l -3.90261,-3.87414 -1.85208,0.26275 c -3.55172,0.50387 -7.874819,-0.44232 -11.377083,-2.49009 -2.177838,-1.27339 -5.193661,-4.24787 -6.434874,-6.34668 -1.956459,-3.30823 -2.968649,-7.98779 -2.477143,-11.45233 l 0.262751,-1.85209 -3.874141,-3.9026 c -2.130778,-2.14643 -3.949892,-3.9026 -4.042475,-3.9026 -0.243234,0 -1.733546,4.6332 -2.048863,6.36968 -0.81466,4.48639 -0.596456,8.8258 0.662903,13.18313 3.131967,10.83646 12.496646,18.86604 23.772675,20.38346 2.35102,0.31638 7.14724,0.11598 9.38776,-0.39225 z m 28.53793,-7.72788 -8.3733,-8.40052 0.65563,-1.71632 c 1.34315,-3.51611 1.76922,-5.93825 1.76922,-10.05764 0,-4.2363 -0.44404,-6.64777 -1.93452,-10.50591 -2.84057,-7.3529 -8.88953,-13.30155 -16.38589,-16.1142 -3.61376,-1.35589 -6.26668,-1.81524 -10.34954,-1.79203 -3.88109,0.0221 -5.878521,0.36641 -9.439585,1.62737 l -2.163545,0.7661 -6.002303,-6.00656 c -3.301267,-3.30361 -5.899547,-6.06828 -5.773955,-6.14371 1.148521,-0.68983 7.945196,-2.39473 12.531474,-3.14344 4.725066,-0.77137 14.187124,-0.96552 19.124664,-0.39242 9.18731,1.06637 16.43184,3.24262 25.19304,7.56796 12.18636,6.01631 23.07964,15.30663 31.28804,26.68395 2.63494,3.65219 3.10779,4.78614 3.10779,7.45289 0,1.92294 -0.10532,2.45992 -0.72654,3.70417 -2.36813,4.74314 -10.57623,14.15293 -17.13283,19.64111 -2.24235,1.87695 -6.67997,5.22972 -6.9219,5.22972 -0.051,0 -3.86064,-3.78023 -8.46595,-8.40052 z m -27.31392,-27.28978 c -7.72234,-7.72407 -10.70511,-10.86921 -10.45479,-11.02391 0.65755,-0.40639 6.09498,-0.23101 7.91281,0.25523 6.56229,1.75528 11.63079,6.82377 13.38607,13.38607 0.50707,1.89575 0.65945,7.49156 0.21607,7.93494 -0.16377,0.16377 -4.12395,-3.61458 -11.06016,-10.55233 z"/></svg>),
+};
+
+
+function fmt(dt) {
+  if (!dt) return "—";
+  const d = new Date(dt);
+  return d.toLocaleString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, hideCancel, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-bold mb-2">{title}</h2>
+        <p className="text-sm text-slate-600 mb-5 whitespace-pre-wrap">{message}</p>
+        <div className="flex gap-2 justify-end">
+          {!hideCancel && <button onClick={onCancel} className="text-sm text-slate-500 px-4 py-2">{cancelLabel || "取消"}</button>}
+          <button onClick={onConfirm} className={"text-sm text-white rounded-lg px-4 py-2 " + (danger ? "bg-rose-600" : "bg-slate-900")}>
+            {confirmLabel || "確認"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_LABEL_BR = { open: "未處理", reviewed: "已查看", resolved: "已解決" };
+const STATUS_COLOR_BR = { open: "bg-rose-100 text-rose-700", reviewed: "bg-amber-100 text-amber-700", resolved: "bg-emerald-100 text-emerald-700" };
+const ROLE_LABEL = { free: "免費會員", vip: "VIP 會員", admin: "管理員" };
+
+// =====================================================================
+// 登入畫面（簡化版，只需要 email/密碼登入，帳號本身在 task-cloud.html 那邊註冊）
+// =====================================================================
+function AuthScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    if (error) setErr(error.message);
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow p-8 w-full max-w-sm">
+        <h1 className="text-lg font-bold mb-1">管理後台登入</h1>
+        <p className="text-xs text-slate-400 mb-6">請使用你在任務雲（TaskCloud）的 admin 帳號登入</p>
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500">Email</label>
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">密碼</label>
+            <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+          <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+            {busy ? "登入中…" : "登入"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// 錯誤回報管理分頁
+// =====================================================================
+function BugReportsTab() {
+  const [reports, setReports] = useState([]);
+  const [statusFilter, setStatusFilter] = useState("all"); // all | open | reviewed | resolved
+  const [drafts, setDrafts] = useState({}); // { [reportId]: replyText }
+  const [savingId, setSavingId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(async () => {
+    const { data, error } = await sb.from("bug_reports")
+      .select("*, reporter:profiles!bug_reports_reporter_id_fkey(display_name,email)")
+      .order("created_at", { ascending: false });
+    if (error) setErr(error.message);
+    else setReports(data || []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("admin-bug-reports")
+      .on("postgres_changes", { event: "*", schema: "public", table: "bug_reports" }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
+
+  async function saveStatus(id, status) {
+    setSavingId(id);
+    const { error } = await sb.from("bug_reports").update({ status }).eq("id", id);
+    setSavingId(null);
+    if (error) setErr(error.message); else load();
+  }
+
+  async function saveReply(id) {
+    const reply = drafts[id];
+    if (reply === undefined) return;
+    setSavingId(id);
+    const { error } = await sb.from("bug_reports").update({ admin_reply: reply, status: "reviewed" }).eq("id", id);
+    setSavingId(null);
+    if (error) setErr(error.message); else load();
+  }
+
+  async function doDelete() {
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
+    const { error } = await sb.from("bug_reports").delete().eq("id", id);
+    if (error) setErr(error.message); else load();
+  }
+
+  const filtered = statusFilter === "all" ? reports : reports.filter(r => r.status === statusFilter);
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-4">
+        {["all", "open", "reviewed", "resolved"].map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)}
+            className={"text-xs px-3 py-1.5 rounded-lg " + (statusFilter === s ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+            {s === "all" ? `全部（${reports.length}）` : `${STATUS_LABEL_BR[s]}（${reports.filter(r => r.status === s).length}）`}
+          </button>
+        ))}
+      </div>
+
+      {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-3">{err}</div>}
+
+      <div className="space-y-3">
+        {filtered.length === 0 && <p className="text-sm text-slate-400">目前沒有符合條件的回報</p>}
+        {filtered.map(r => (
+          <div key={r.id} className="bg-white rounded-2xl shadow p-4">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR_BR[r.status]}>{STATUS_LABEL_BR[r.status]}</span>
+                <span className="ml-2 text-xs text-slate-400">{r.reporter?.display_name}（{r.reporter?.email}）</span>
+              </div>
+              <span className="text-xs text-slate-400">{fmt(r.created_at)}</span>
+            </div>
+            <p className="text-sm whitespace-pre-wrap mb-3">{r.content}</p>
+
+            <label className="text-xs text-slate-500">回覆給使用者（使用者可以看到這段內容）</label>
+            <textarea rows={2} value={drafts[r.id] !== undefined ? drafts[r.id] : (r.admin_reply || "")}
+              onChange={e => setDrafts(d => ({ ...d, [r.id]: e.target.value }))}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+
+            <div className="flex justify-between items-center mt-3">
+              <div className="flex gap-2">
+                <button onClick={() => saveReply(r.id)} disabled={savingId === r.id} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 disabled:opacity-50">
+                  儲存回覆
+                </button>
+                <select value={r.status} onChange={e => saveStatus(r.id, e.target.value)} disabled={savingId === r.id}
+                  className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+                  <option value="open">未處理</option>
+                  <option value="reviewed">已查看</option>
+                  <option value="resolved">已解決</option>
+                </select>
+              </div>
+              <button onClick={() => setConfirmDeleteId(r.id)} title="刪除回報" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                <Icon.Trash className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {confirmDeleteId && (
+        <ConfirmModal
+          title="刪除回報"
+          message="此回報將永久刪除，無法復原！確定或取消？"
+          confirmLabel="確定刪除"
+          danger
+          onConfirm={doDelete}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 使用者總覽分頁
+// =====================================================================
+function UsersTab({ currentUserId }) {
+  const [users, setUsers] = useState([]);
+  const [missions, setMissions] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [savingId, setSavingId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(async () => {
+    const [{ data: profs, error: e1 }, { data: miss, error: e2 }] = await Promise.all([
+      sb.from("profiles").select("id,display_name,email,member_role,created_at").order("created_at", { ascending: false }),
+      sb.from("missions").select("id,creator_id,status,project_id"),
+    ]);
+    if (e1) setErr(e1.message);
+    else if (e2) setErr(e2.message);
+    else { setUsers(profs || []); setMissions(miss || []); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const statsByUser = useMemo(() => {
+    const map = {};
+    for (const m of missions) {
+      if (!map[m.creator_id]) map[m.creator_id] = { total: 0, open: 0, personalOpen: 0 };
+      map[m.creator_id].total += 1;
+      const isOpen = m.status === "added" || m.status === "in_progress";
+      if (isOpen) {
+        map[m.creator_id].open += 1;
+        if (!m.project_id) map[m.creator_id].personalOpen += 1;
+      }
+    }
+    return map;
+  }, [missions]);
+
+  async function changeRole(userId, role) {
+    setSavingId(userId);
+    const { error } = await sb.from("profiles").update({ member_role: role }).eq("id", userId);
+    setSavingId(null);
+    if (error) setErr(error.message); else load();
+  }
+
+  const filtered = users.filter(u =>
+    !searchTerm.trim()
+    || (u.display_name || "").toLowerCase().includes(searchTerm.trim().toLowerCase())
+    || (u.email || "").toLowerCase().includes(searchTerm.trim().toLowerCase())
+  );
+
+  return (
+    <div>
+      <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="搜尋姓名或 email…"
+        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-4" />
+
+      {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-3">{err}</div>}
+
+      <div className="bg-white rounded-2xl shadow overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
+              <th className="px-4 py-2 font-medium">使用者</th>
+              <th className="px-4 py-2 font-medium">會員等級</th>
+              <th className="px-4 py-2 font-medium">個人任務進行中</th>
+              <th className="px-4 py-2 font-medium">全部進行中</th>
+              <th className="px-4 py-2 font-medium">歷史任務總數</th>
+              <th className="px-4 py-2 font-medium">註冊時間</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(u => {
+              const stats = statsByUser[u.id] || { total: 0, open: 0, personalOpen: 0 };
+              return (
+                <tr key={u.id} className="border-b border-slate-100">
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="font-medium">{u.display_name}</div>
+                    <div className="text-xs text-slate-400">{u.email}</div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <select value={u.member_role} disabled={u.id === currentUserId || savingId === u.id}
+                      onChange={e => changeRole(u.id, e.target.value)}
+                      className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white disabled:opacity-50">
+                      <option value="free">免費會員</option>
+                      <option value="vip">VIP 會員</option>
+                      <option value="admin">管理員</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{stats.personalOpen}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{stats.open}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{stats.total}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(u.created_at)}</td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">找不到符合的使用者</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-400 mt-2">＊自己這一列的會員等級選單會被鎖住，避免不小心把自己降級或改掉。要調整自己的等級，請用另一個 admin 帳號操作。</p>
+    </div>
+  );
+}
+
+// =====================================================================
+// 管理後台主畫面（分頁籤：錯誤回報管理 / 使用者總覽）
+// =====================================================================
+function AdminDashboard({ session }) {
+  const [tab, setTab] = useState("reports"); // reports | users
+
+  return (
+    <div className="min-h-screen">
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+          <div className="flex items-center gap-6">
+            <h1 className="font-bold text-lg">管理後台</h1>
+            <nav className="flex gap-1">
+              {[["reports", "錯誤回報管理"], ["users", "使用者總覽"]].map(([k, l]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={"text-sm px-3 py-1.5 rounded-lg " + (tab === k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>
+                  {l}
+                </button>
+              ))}
+            </nav>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">{session.user.email}</span>
+            <button onClick={() => sb.auth.signOut()} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">登出</button>
+          </div>
+        </div>
+      </header>
+      <main className="max-w-5xl mx-auto px-6 py-6">
+        {tab === "reports" && <BugReportsTab />}
+        {tab === "users" && <UsersTab currentUserId={session.user.id} />}
+      </main>
+    </div>
+  );
+}
+
+// =====================================================================
+// 頂層 App：登入狀態 + admin 權限檢查
+// =====================================================================
+function App() {
+  const [session, setSession] = useState(undefined);
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = sb.auth.onAuthStateChange((_event, sess) => setSession(sess));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setProfile(null); return; }
+    let cancelled = false;
+    async function fetchProfile(retries) {
+      const { data } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
+      if (cancelled) return;
+      if (data) setProfile(data);
+      else if (retries > 0) setTimeout(() => fetchProfile(retries - 1), 500);
+    }
+    fetchProfile(4);
+    return () => { cancelled = true; };
+  }, [session]);
+
+  if (!sb) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow p-8 max-w-sm text-sm text-slate-500">
+          尚未設定 Supabase 連線資訊，請在檔案最上方填入 SUPABASE_URL / SUPABASE_ANON_KEY（跟 task-cloud.html 用同一組值）。
+        </div>
+      </div>
+    );
+  }
+
+  if (session === undefined) return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">載入中…</div>;
+  if (!session) return <AuthScreen />;
+  if (!profile) return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">載入使用者資料中…</div>;
+
+  if (profile.member_role !== "admin") {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow p-8 max-w-sm text-center">
+          <h1 className="font-bold text-lg mb-2">沒有權限存取此頁面</h1>
+          <p className="text-sm text-slate-500 mb-4">這個頁面僅供管理員使用，你目前的帳號（{session.user.email}）不是管理員身分。</p>
+          <button onClick={() => sb.auth.signOut()} className="text-xs bg-slate-100 rounded-lg px-4 py-2">登出</button>
+        </div>
+      </div>
+    );
+  }
+
+  return <AdminDashboard session={session} />;
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("渲染錯誤：", error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ maxWidth: 640, margin: "60px auto", padding: 24, border: "1px solid #fecaca", background: "#fff1f2", borderRadius: 12, fontFamily: "sans-serif", color: "#7f1d1d" }}>
+          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>畫面渲染時發生錯誤</h2>
+          <p style={{ fontSize: 14, margin: "0 0 8px" }}>錯誤訊息：{this.state.error.message}</p>
+          <p style={{ fontSize: 12, color: "#9f1239" }}>請打開瀏覽器開發者工具（F12）的 Console 分頁查看詳細內容。</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);
+} catch (e) {
+  document.getElementById("root").innerHTML =
+    '<div style="max-width:640px;margin:60px auto;padding:24px;border:1px solid #fecaca;background:#fff1f2;border-radius:12px;font-family:sans-serif;color:#7f1d1d;">' +
+    '<h2 style="margin:0 0 8px;font-size:18px;">初始化時發生錯誤</h2>' +
+    '<p style="font-size:14px;">' + e.message + '</p></div>';
+}
+</script>
+<script>
+  // 手動呼叫 Babel.transform 並強制指定 runtime: "classic"（用全域 React/ReactDOM 變數），
+  // 避免自動掃描 type="text/babel" 時，較新版 babel-standalone 預設改用 "automatic" runtime
+  // 而產生 `import ... from "react/jsx-runtime"`，在一般 <script> 環境中無法執行的問題。
+  (function () {
+    try {
+      var source = document.getElementById("app-source").textContent;
+      var output = Babel.transform(source, {
+        presets: [["react", { runtime: "classic" }]],
+      }).code;
+      var s = document.createElement("script");
+      s.text = output;
+      document.body.appendChild(s);
+    } catch (e) {
+      document.getElementById("root").innerHTML =
+        '<div style="max-width:640px;margin:60px auto;padding:24px;border:1px solid #fecaca;background:#fff1f2;border-radius:12px;font-family:sans-serif;color:#7f1d1d;">' +
+        '<h2 style="margin:0 0 8px;font-size:18px;">程式碼轉譯時發生錯誤</h2>' +
+        '<p style="font-size:14px;">' + e.message + '</p></div>';
+    }
+  })();
+</script>
+</body>
+</html>
