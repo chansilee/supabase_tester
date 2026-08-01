@@ -2823,6 +2823,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [hiddenIds, setHiddenIds] = useState([]);
   const [friendProfiles, setFriendProfiles] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [myProjectIds, setMyProjectIds] = useState([]);
   const [openProjectId, setOpenProjectId] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
   const [showMemberRoleModal, setShowMemberRoleModal] = useState(false);
@@ -2868,6 +2869,14 @@ function Dashboard({ session, profile, setProfile }) {
     setProjects(data || []);
   }, []);
 
+  // 自己所屬（發起或加入）的專案 ID 清單。project_members 這張表沒有給 admin 額外的讀取權限，
+  // 所以不管是不是 admin，這裡查到的都只會是「自己真正有份」的專案，可以用來在前端一致地
+  // 過濾掉 admin 因為管理用途的資料庫權限而多讀到、但畫面上不該顯示給自己看的任務/專案。
+  const loadMyProjectIds = useCallback(async () => {
+    const { data } = await sb.from("project_members").select("project_id").eq("user_id", profile.id);
+    setMyProjectIds((data || []).map(r => r.project_id));
+  }, [profile.id]);
+
   const loadCurrentProjectMembers = useCallback(async (pid) => {
     if (!pid) { setCurrentProjectMembers([]); return; }
     const { data } = await sb.from("project_members").select("user:profiles!project_members_user_id_fkey(id,display_name)").eq("project_id", pid);
@@ -2876,7 +2885,7 @@ function Dashboard({ session, profile, setProfile }) {
 
   useEffect(() => { openProjectIdRef.current = openProjectId; loadCurrentProjectMembers(openProjectId); }, [openProjectId, loadCurrentProjectMembers]);
 
-  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); loadFriendProfiles(); loadProjects(); }, [loadMissions, loadNotifs, loadHiddenIds, loadFriendProfiles, loadProjects]);
+  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); loadFriendProfiles(); loadProjects(); loadMyProjectIds(); }, [loadMissions, loadNotifs, loadHiddenIds, loadFriendProfiles, loadProjects, loadMyProjectIds]);
 
   async function hideMission(missionId) {
     setHiddenIds(ids => ids.includes(missionId) ? ids : [...ids, missionId]);
@@ -2916,7 +2925,7 @@ function Dashboard({ session, profile, setProfile }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => { loadMissions(); loadFriendProfiles(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_hides" }, () => loadHiddenIds())
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
-      .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, () => { loadProjects(); loadCurrentProjectMembers(openProjectIdRef.current); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, () => { loadProjects(); loadCurrentProjectMembers(openProjectIdRef.current); loadMyProjectIds(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` }, () => loadNotifs())
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${profile.id}` }, (payload) => {
         // 自己的 profiles 資料列在別的裝置被改動時（例如顯示欄位/區塊設定），同步更新這台裝置的畫面
@@ -2927,7 +2936,7 @@ function Dashboard({ session, profile, setProfile }) {
       })
       .subscribe();
     return () => { sb.removeChannel(channel); };
-  }, [loadMissions, loadHiddenIds, loadFriendProfiles, loadProjects, loadCurrentProjectMembers, loadNotifs, profile.id, setProfile]);
+  }, [loadMissions, loadHiddenIds, loadFriendProfiles, loadProjects, loadCurrentProjectMembers, loadMyProjectIds, loadNotifs, profile.id, setProfile]);
 
   const markNotifsRead = useCallback(async () => {
     await sb.from("notifications").update({ is_read: true }).eq("user_id", profile.id).eq("is_read", false);
@@ -2947,7 +2956,16 @@ function Dashboard({ session, profile, setProfile }) {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, [notifOpen, markNotifsRead]);
 
-  const personalMissions = missions.filter(m => !m.project_id);
+  // 一致性過濾：不管 member_role 是不是 admin，這裡都只保留「自己是建立者／被指派者／
+  // 屬於自己所在的專案」這幾種情況——確保 admin 因為管理用途而被資料庫多放行的資料，
+  // 不會顯示在自己一般操作畫面上，讓 admin 在這裡看到的邏輯跟其他角色完全一致。
+  const myProjectIdSet = new Set(myProjectIds);
+  const visibleMissions = missions.filter(m =>
+    m.creator_id === profile.id || m.assigned_id === profile.id || (m.project_id && myProjectIdSet.has(m.project_id))
+  );
+  const visibleProjects = projects.filter(p => p.creator_id === profile.id || myProjectIdSet.has(p.id));
+
+  const personalMissions = visibleMissions.filter(m => !m.project_id);
   const relationFilteredPersonal = personalMissions.filter(m => relationFilter[relationCategory(m, profile.id)]);
 
   const searchedMissions = appliedSearch
@@ -2973,8 +2991,8 @@ function Dashboard({ session, profile, setProfile }) {
     profile.priority_weights
   );
 
-  const currentProject = projects.find(p => p.id === openProjectId) || null;
-  const projectMissionsRaw = missions.filter(m => m.project_id === openProjectId);
+  const currentProject = visibleProjects.find(p => p.id === openProjectId) || null;
+  const projectMissionsRaw = visibleMissions.filter(m => m.project_id === openProjectId);
   const projectOpenMissionsAll = projectMissionsRaw.filter(m => m.status === "added" || m.status === "in_progress");
   const projectMissionsFiltered = projectMissionsRaw.filter(m => relationFilter[relationCategory(m, profile.id)]);
   const projectAllMissions = sortMissions(projectMissionsFiltered, "created_desc", profile.priority_weights);
@@ -3193,14 +3211,14 @@ function Dashboard({ session, profile, setProfile }) {
                 </tr>
               </thead>
               <tbody>
-                {projects.map(p => (
+                {visibleProjects.map(p => (
                   <tr key={p.id} onClick={() => setOpenProjectId(p.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
                     <td className="px-4 py-3 font-medium">{p.name}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-slate-500">{p.creator?.display_name}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(p.created_at)}</td>
                   </tr>
                 ))}
-                {projects.length === 0 && (
+                {visibleProjects.length === 0 && (
                   <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400">目前沒有任何專案</td></tr>
                 )}
               </tbody>
