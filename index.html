@@ -235,6 +235,7 @@ table { border-collapse: collapse; width: 100%; }
 .h-5 { height: 1.25rem; }
 .w-6 { width: 1.5rem; }
 .h-6 { height: 1.5rem; }
+.h-8 { height: 2rem; }
 .w-7 { width: 1.75rem; }
 .h-7 { height: 1.75rem; }
 .w-72 { width: 18rem; }
@@ -290,6 +291,7 @@ table { border-collapse: collapse; width: 100%; }
 .flex-col { flex-direction: column; }
 .inline-block { display: inline-block; }
 .grid { display: grid; }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .flex-1 { flex: 1 1 0%; }
 .flex-wrap { flex-wrap: wrap; }
 .items-center { align-items: center; }
@@ -373,6 +375,7 @@ const TASK_LIST_COLUMNS = [
   { key: "due_date", label: "截止時間" },
   { key: "status", label: "狀態" },
   { key: "action", label: "動作" },
+  { key: "no_progress_days", label: "無進度天數" },
 ];
 const DEFAULT_VISIBLE_COLUMNS = TASK_LIST_COLUMNS.reduce((acc, c) => { acc[c.key] = true; return acc; }, {});
 
@@ -581,6 +584,62 @@ function procrastinationTier(status) {
 // 甘特圖表頭用：星期幾中文標籤（對應 Date.getDay() 0~6）
 const WEEKDAY_LABELS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 
+// 無進度天數：距離上次更新，若不到 24 小時算「本日有進度」，之後每滿 24 小時算多一天無進度
+function noProgressDaysInt(updatedAt) {
+  const hours = (Date.now() - new Date(updatedAt).getTime()) / 3600000;
+  return hours < 24 ? 0 : Math.floor(hours / 24);
+}
+function noProgressText(updatedAt) {
+  const days = noProgressDaysInt(updatedAt);
+  return days === 0 ? "本日有進度" : `無進度${days}天`;
+}
+// 無進度天數顏色：0 天（本日有進度）＝不急的綠色端，達到「嚴重度天數」門檻＝緊急的紅色端，中間線性內插，超過門檻固定顯示紅色端
+function noProgressColor(updatedAt, severityDays) {
+  const days = noProgressDaysInt(updatedAt);
+  const t = Math.min(2, (days / (severityDays || 7)) * 2);
+  return urgencyColor(t);
+}
+
+// 排序模式對應的中文標籤（給「記住排序原則」下拉選單顯示用）
+const SORT_MODE_LABELS = {
+  created_desc: "建立時間排序",
+  due_asc: "截止時間排序",
+  priority_desc: "優先級分數排序",
+  priority_first: "重要性優先",
+  scale_asc: "小任務優先",
+  scale_desc: "大任務優先",
+  procrastination_desc: "拖延優先",
+};
+
+// 排序模式對應到要淡色遮罩標示的欄位（可能不只一欄，例如優先級分數同時參考重要性與緊急度）
+const SORT_MODE_HIGHLIGHT_COLUMNS = {
+  created_desc: ["created_at"],
+  due_asc: ["due_date"],
+  priority_desc: ["priority", "urgency"],
+  priority_first: ["priority"],
+  scale_asc: ["scale"],
+  scale_desc: ["scale"],
+  procrastination_desc: ["no_progress_days"],
+};
+
+// 特殊色欄位遮罩：跟原本藍色維持同樣的飽和度/明度，只換色相，供使用者自行挑選
+const SORT_HIGHLIGHT_COLORS = {
+  blue: { label: "藍", hex: "#6FA3E0" },
+  warm_yellow: { label: "暖黃", hex: "#E0CD6F" },
+  lemon_yellow: { label: "檸檬黃", hex: "#E0D76F" },
+  grass_green: { label: "草綠", hex: "#6FE082" },
+  mint_green: { label: "薄荷綠", hex: "#6FE0A8" },
+  coral_red: { label: "珊瑚紅", hex: "#E0786F" },
+  rose_red: { label: "玫瑰紅", hex: "#E06F82" },
+};
+function hexToRgbString(hex) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `${r},${g},${b}`;
+}
+
 function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -722,6 +781,8 @@ function sortMissions(list, mode, weights) {
     });
   } else if (mode === "priority_desc") {
     arr.sort((a, b) => overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
+  } else if (mode === "priority_first") {
+    arr.sort((a, b) => (PRIORITY_SCORE_MAP[b.priority] - PRIORITY_SCORE_MAP[a.priority]) || (overallPriorityScore(b, weights) - overallPriorityScore(a, weights)));
   } else if (mode === "scale_asc") {
     arr.sort((a, b) => (a.scale || 1) - (b.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
   } else if (mode === "scale_desc") {
@@ -1278,15 +1339,94 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 // =====================================================================
 // 任務清單（傳統列表模式）
 // =====================================================================
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride }) {
+const COLUMN_LABELS = {
+  created_at: "建立時間", creator: "建立成員", assignee: "指派給", relation: "指派關係",
+  updated_at: "最後更新", procrastination_days: "拖延天數", title: "任務標題", priority: "重要性",
+  scale: "任務規模", urgency: "緊急度", due_date: "截止時間", status: "狀態", action: "動作",
+  no_progress_days: "無進度天數",
+};
+
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays }) {
   const vc = visibleColumns || DEFAULT_VISIBLE_COLUMNS;
-  const colCount = TASK_LIST_COLUMNS.filter(c => vc[c.key]).length || 1;
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const confirmDeleteMission = missions.find(m => m.id === confirmDeleteId) || null;
+
+  const highlightCols = SORT_MODE_HIGHLIGHT_COLUMNS[sortMode] || [];
+  const highlightSet = new Set(highlightCols);
+  const highlightHex = (SORT_HIGHLIGHT_COLORS[sortHighlightColor] || SORT_HIGHLIGHT_COLORS.blue).hex;
+  const highlightRgb = hexToRgbString(highlightHex);
+  const headerHighlightStyle = { background: `rgba(${highlightRgb},0.15)` };
+  const cellHighlightStyle = { background: `rgba(${highlightRgb},0.08)` };
+
+  // 決定欄位顯示順序：開啟「強制顯示排序欄位在最前面」時，把排序對應的欄位（不論原本是否被隱藏）
+  // 提到最前面；其餘欄位依原本順序、且只顯示有勾選顯示的
+  const baseKeys = TASK_LIST_COLUMNS.map(c => c.key);
+  const orderedKeys = forceShowSortColumn && highlightCols.length
+    ? [...highlightCols, ...baseKeys.filter(k => !highlightSet.has(k))]
+    : baseKeys;
+  const visibleKeys = orderedKeys.filter(k => vc[k] || (forceShowSortColumn && highlightSet.has(k)));
+  const colCount = visibleKeys.length || 1;
 
   function handleConfirmDelete() {
     onDelete(confirmDeleteId);
     setConfirmDeleteId(null);
+  }
+
+  function th(key) {
+    return <th key={key} className="px-4 py-2 font-medium" style={highlightSet.has(key) ? headerHighlightStyle : undefined}>{COLUMN_LABELS[key]}</th>;
+  }
+  function td(key, content, extraClass, onClickCell) {
+    return <td key={key} className={extraClass || "px-4 py-3 whitespace-nowrap"} style={highlightSet.has(key) ? cellHighlightStyle : undefined} onClick={onClickCell}>{content}</td>;
+  }
+
+  function renderCell(key, m) {
+    const rd = remainingDays(m.due_date);
+    const urgency = rd === null ? null : urgencyScore(rd, m.scale || 1);
+    const isHidden = hiddenIds && hiddenIds.has(m.id);
+    const isOwn = m.creator_id === currentUserId;
+    switch (key) {
+      case "created_at": return td(key, fmt(m.created_at), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "creator": return td(key, m.creator?.display_name);
+      case "assignee": return td(key, m.assignee?.display_name);
+      case "relation": return td(key,
+        relationDisplayMode === "text"
+          ? RELATION_LABELS[relationCategory(m, currentUserId)]
+          : <AssignRelationIcon {...RELATION_ICON_PROPS[relationCategory(m, currentUserId)]} className="w-10 h-6" />
+      );
+      case "updated_at": return td(key, fmt(m.updated_at), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "procrastination_days": return td(key, procrastinationDays(m).toFixed(1) + "天", "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "no_progress_days": return td(key,
+        noProgressColorOverride
+          ? <span style={{ color: noProgressColor(m.updated_at, noProgressSeverityDays) }}>{noProgressText(m.updated_at)}</span>
+          : noProgressText(m.updated_at),
+        "px-4 py-3 whitespace-nowrap text-slate-500"
+      );
+      case "title": return td(key, m.title, "px-4 py-3 font-medium");
+      case "priority": return td(key, renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "scale": return td(key, renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "urgency": return td(key, renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "due_date": return td(key, renderDueDate(m, dueDateDisplayList, dueDateColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500");
+      case "status": return td(key, <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>);
+      case "action": return td(key, (
+        <div className="flex items-center gap-2">
+          {isHidden ? (
+            <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
+              <Icon.Show className="w-4 h-4" />
+            </button>
+          ) : !isOwn ? (
+            <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
+              <Icon.Hidden className="w-4 h-4" />
+            </button>
+          ) : null}
+          {isOwn && (
+            <button onClick={() => setConfirmDeleteId(m.id)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+              <Icon.Trash className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      ), null, e => e.stopPropagation());
+      default: return null;
+    }
   }
 
   return (
@@ -1294,74 +1434,15 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
-            {vc.created_at && <th className="px-4 py-2 font-medium">建立時間</th>}
-            {vc.creator && <th className="px-4 py-2 font-medium">建立成員</th>}
-            {vc.assignee && <th className="px-4 py-2 font-medium">指派給</th>}
-            {vc.relation && <th className="px-4 py-2 font-medium">指派關係</th>}
-            {vc.updated_at && <th className="px-4 py-2 font-medium">最後更新</th>}
-            {vc.procrastination_days && <th className="px-4 py-2 font-medium">拖延天數</th>}
-            {vc.title && <th className="px-4 py-2 font-medium">任務標題</th>}
-            {vc.priority && <th className="px-4 py-2 font-medium">重要性</th>}
-            {vc.scale && <th className="px-4 py-2 font-medium">任務規模</th>}
-            {vc.urgency && <th className="px-4 py-2 font-medium">緊急度</th>}
-            {vc.due_date && <th className="px-4 py-2 font-medium">截止時間</th>}
-            {vc.status && <th className="px-4 py-2 font-medium">狀態</th>}
-            {vc.action && <th className="px-4 py-2 font-medium">動作</th>}
+            {visibleKeys.map(key => th(key))}
           </tr>
         </thead>
         <tbody>
-          {missions.map(m => {
-            const rd = remainingDays(m.due_date);
-            const urgency = rd === null ? null : urgencyScore(rd, m.scale || 1);
-            const isHidden = hiddenIds && hiddenIds.has(m.id);
-            const isOwn = m.creator_id === currentUserId;
-            return (
-              <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
-                {vc.created_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.created_at)}</td>}
-                {vc.creator && <td className="px-4 py-3 whitespace-nowrap">{m.creator?.display_name}</td>}
-                {vc.assignee && <td className="px-4 py-3 whitespace-nowrap">{m.assignee?.display_name}</td>}
-                {vc.relation && (
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {relationDisplayMode === "text"
-                      ? RELATION_LABELS[relationCategory(m, currentUserId)]
-                      : <AssignRelationIcon {...RELATION_ICON_PROPS[relationCategory(m, currentUserId)]} className="w-10 h-6" />}
-                  </td>
-                )}
-                {vc.updated_at && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(m.updated_at)}</td>}
-                {vc.procrastination_days && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{procrastinationDays(m).toFixed(1)}天</td>}
-                {vc.title && <td className="px-4 py-3 font-medium">{m.title}</td>}
-                {vc.priority && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride)}</td>}
-                {vc.scale && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride)}</td>}
-                {vc.urgency && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride)}</td>}
-                {vc.due_date && <td className="px-4 py-3 whitespace-nowrap text-slate-500">{renderDueDate(m, dueDateDisplayList, dueDateColorOverride)}</td>}
-                {vc.status && (
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>
-                  </td>
-                )}
-                {vc.action && (
-                  <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-2">
-                      {isHidden ? (
-                        <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
-                          <Icon.Show className="w-4 h-4" />
-                        </button>
-                      ) : !isOwn ? (
-                        <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
-                          <Icon.Hidden className="w-4 h-4" />
-                        </button>
-                      ) : null}
-                      {isOwn && (
-                        <button onClick={() => setConfirmDeleteId(m.id)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                          <Icon.Trash className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                )}
-              </tr>
-            );
-          })}
+          {missions.map(m => (
+            <tr key={m.id} onClick={() => onOpen(m.id)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+              {visibleKeys.map(key => renderCell(key, m))}
+            </tr>
+          ))}
           {missions.length === 0 && (
             <tr><td colSpan={colCount} className="px-4 py-8 text-center text-slate-400">目前沒有符合條件的任務</td></tr>
           )}
@@ -1813,12 +1894,20 @@ function SettingsView({ profile, onProfileChange }) {
   const dueDateDisplayDetail = profile.due_date_display_detail || "raw";
   const dueDateDisplayList = profile.due_date_display_list || "raw";
   const dueDateColorOverride = profile.due_date_color_override || false;
+  const forceShowSortColumn = profile.force_show_sort_column !== false;
+  const noProgressColorOverride = profile.no_progress_color_override || false;
+  const noProgressSeverityDays = profile.no_progress_severity_days || 7;
+  const rememberSortMode = profile.remember_sort_mode || "last_used";
   const [editingOtherDisplay, setEditingOtherDisplay] = useState(false);
   const [relationFilterDisplayTopDraft, setRelationFilterDisplayTopDraft] = useState(relationFilterDisplayTop);
   const [relationFilterDisplayListDraft, setRelationFilterDisplayListDraft] = useState(relationFilterDisplayList);
   const [dueDateDisplayDetailDraft, setDueDateDisplayDetailDraft] = useState(dueDateDisplayDetail);
   const [dueDateDisplayListDraft, setDueDateDisplayListDraft] = useState(dueDateDisplayList);
   const [dueDateColorOverrideDraft, setDueDateColorOverrideDraft] = useState(dueDateColorOverride);
+  const [forceShowSortColumnDraft, setForceShowSortColumnDraft] = useState(forceShowSortColumn);
+  const [noProgressColorOverrideDraft, setNoProgressColorOverrideDraft] = useState(noProgressColorOverride);
+  const [noProgressSeverityDaysDraft, setNoProgressSeverityDaysDraft] = useState(String(noProgressSeverityDays));
+  const [rememberSortModeDraft, setRememberSortModeDraft] = useState(rememberSortMode);
   const [savingOtherDisplay, setSavingOtherDisplay] = useState(false);
 
   function startEditOtherDisplay() {
@@ -1827,9 +1916,14 @@ function SettingsView({ profile, onProfileChange }) {
     setDueDateDisplayDetailDraft(dueDateDisplayDetail);
     setDueDateDisplayListDraft(dueDateDisplayList);
     setDueDateColorOverrideDraft(dueDateColorOverride);
+    setForceShowSortColumnDraft(forceShowSortColumn);
+    setNoProgressColorOverrideDraft(noProgressColorOverride);
+    setNoProgressSeverityDaysDraft(String(noProgressSeverityDays));
+    setRememberSortModeDraft(rememberSortMode);
     setEditingOtherDisplay(true);
   }
   async function saveOtherDisplay() {
+    const parsedDays = Math.max(1, parseInt(noProgressSeverityDaysDraft, 10) || 7);
     setSavingOtherDisplay(true);
     const { error } = await sb.from("profiles").update({
       relation_filter_display_top: relationFilterDisplayTopDraft,
@@ -1837,6 +1931,10 @@ function SettingsView({ profile, onProfileChange }) {
       due_date_display_detail: dueDateDisplayDetailDraft,
       due_date_display_list: dueDateDisplayListDraft,
       due_date_color_override: dueDateColorOverrideDraft,
+      force_show_sort_column: forceShowSortColumnDraft,
+      no_progress_color_override: noProgressColorOverrideDraft,
+      no_progress_severity_days: parsedDays,
+      remember_sort_mode: rememberSortModeDraft,
     }).eq("id", profile.id);
     setSavingOtherDisplay(false);
     if (!error) {
@@ -1847,8 +1945,33 @@ function SettingsView({ profile, onProfileChange }) {
         due_date_display_detail: dueDateDisplayDetailDraft,
         due_date_display_list: dueDateDisplayListDraft,
         due_date_color_override: dueDateColorOverrideDraft,
+        force_show_sort_column: forceShowSortColumnDraft,
+        no_progress_color_override: noProgressColorOverrideDraft,
+        no_progress_severity_days: parsedDays,
+        remember_sort_mode: rememberSortModeDraft,
       });
       setEditingOtherDisplay(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+
+  const sortHighlightColor = profile.sort_highlight_color || "blue";
+  const [editingSortColor, setEditingSortColor] = useState(false);
+  const [sortHighlightColorDraft, setSortHighlightColorDraft] = useState(sortHighlightColor);
+  const [savingSortColor, setSavingSortColor] = useState(false);
+
+  function startEditSortColor() {
+    setSortHighlightColorDraft(sortHighlightColor);
+    setEditingSortColor(true);
+  }
+  async function saveSortColor() {
+    setSavingSortColor(true);
+    const { error } = await sb.from("profiles").update({ sort_highlight_color: sortHighlightColorDraft }).eq("id", profile.id);
+    setSavingSortColor(false);
+    if (!error) {
+      onProfileChange({ ...profile, sort_highlight_color: sortHighlightColorDraft });
+      setEditingSortColor(false);
     } else {
       setMsg({ type: "err", text: error.message });
     }
@@ -2191,78 +2314,143 @@ function SettingsView({ profile, onProfileChange }) {
             }} />
           </div>
         </div>
+      </div>
 
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <div className="flex justify-between items-center mb-2">
-              <h4 className="text-sm font-semibold text-slate-700">其他顯示設定</h4>
-              {!editingOtherDisplay && <button onClick={startEditOtherDisplay} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+      <div className="grid md:grid-cols-2 gap-4 mt-4 mb-4">
+        <div className="bg-white rounded-2xl shadow p-5">
+          <h3 className="font-bold mb-3">特殊色欄位遮罩</h3>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {Object.entries(SORT_HIGHLIGHT_COLORS).map(([key, c]) => (
+              <div key={key} className="bg-slate-50 rounded-lg p-2 text-center">
+                <div className="w-full h-8 rounded-md mb-1" style={{ background: c.hex }}></div>
+                <div className="text-xs font-medium">{c.label}</div>
+                <div className="text-[10px] text-slate-400">{c.hex}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between items-center mb-2 border-t border-slate-100 pt-3">
+            <div className="flex items-center gap-2 text-xs">
+              <label className="text-slate-500">排序欄位遮色：</label>
+              {editingSortColor ? (
+                <select value={sortHighlightColorDraft} onChange={e => setSortHighlightColorDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  {Object.entries(SORT_HIGHLIGHT_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+                </select>
+              ) : (
+                <span className="font-medium">{SORT_HIGHLIGHT_COLORS[sortHighlightColor]?.label}</span>
+              )}
             </div>
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center gap-2">
-                <label className="text-slate-500">指派關係篩選呈現方式(上方核選區)：</label>
-                {editingOtherDisplay ? (
-                  <select value={relationFilterDisplayTopDraft} onChange={e => setRelationFilterDisplayTopDraft(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
-                    <option value="logo">logo顯示</option>
-                    <option value="text">字樣顯示</option>
-                  </select>
-                ) : (
-                  <span className="font-medium">{relationFilterDisplayTop === "text" ? "字樣顯示" : "logo顯示"}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-slate-500">指派關係篩選呈現方式(列表內)：</label>
-                {editingOtherDisplay ? (
-                  <select value={relationFilterDisplayListDraft} onChange={e => setRelationFilterDisplayListDraft(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
-                    <option value="logo">logo顯示</option>
-                    <option value="text">字樣顯示</option>
-                  </select>
-                ) : (
-                  <span className="font-medium">{relationFilterDisplayList === "text" ? "字樣顯示" : "logo顯示"}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-slate-500">截止時間顯示設定(任務內)：</label>
-                {editingOtherDisplay ? (
-                  <select value={dueDateDisplayDetailDraft} onChange={e => setDueDateDisplayDetailDraft(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
-                    <option value="raw">原始設定之截止時間</option>
-                    <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
-                    <option value="remaining_only">剩餘天數提示</option>
-                  </select>
-                ) : (
-                  <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayDetail]}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-slate-500">截止時間顯示設定(列表內)：</label>
-                {editingOtherDisplay ? (
-                  <select value={dueDateDisplayListDraft} onChange={e => setDueDateDisplayListDraft(e.target.value)}
-                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
-                    <option value="raw">原始設定之截止時間</option>
-                    <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
-                    <option value="remaining_only">剩餘天數提示</option>
-                  </select>
-                ) : (
-                  <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayList]}</span>
-                )}
-              </div>
+            {!editingSortColor && <button onClick={startEditSortColor} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
+          </div>
+          {editingSortColor && (
+            <div className="flex gap-2 mt-2">
+              <button onClick={saveSortColor} disabled={savingSortColor} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingSortColor ? "儲存中…" : "儲存"}</button>
+              <button onClick={() => setEditingSortColor(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
             </div>
-            <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingOtherDisplay ? "text-slate-600" : "text-slate-400")}>
-              <input type="checkbox" disabled={!editingOtherDisplay} checked={editingOtherDisplay ? dueDateColorOverrideDraft : dueDateColorOverride}
-                onChange={e => setDueDateColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
-              截止時間文字顯示覆蓋顏色
-            </label>
-            <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。上方核選區與任務列表內可以各自獨立設定。截止時間的三種顯示模式、以及剩餘天數的顏色覆蓋，任務內頁與任務列表也可以分開設定。</p>
-            {editingOtherDisplay && (
-              <div className="flex gap-2 mt-3">
-                <button onClick={saveOtherDisplay} disabled={savingOtherDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingOtherDisplay ? "儲存中…" : "儲存"}</button>
-                <button onClick={() => setEditingOtherDisplay(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
-              </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow p-5">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="font-bold">其他顯示設定</h3>
+            {!editingOtherDisplay && <button onClick={startEditOtherDisplay} className="text-xs bg-slate-100 rounded-lg px-3 py-1.5">編輯</button>}
+          </div>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500">指派關係篩選呈現方式(上方核選區)：</label>
+              {editingOtherDisplay ? (
+                <select value={relationFilterDisplayTopDraft} onChange={e => setRelationFilterDisplayTopDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  <option value="logo">logo顯示</option>
+                  <option value="text">字樣顯示</option>
+                </select>
+              ) : (
+                <span className="font-medium">{relationFilterDisplayTop === "text" ? "字樣顯示" : "logo顯示"}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500">指派關係篩選呈現方式(列表內)：</label>
+              {editingOtherDisplay ? (
+                <select value={relationFilterDisplayListDraft} onChange={e => setRelationFilterDisplayListDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  <option value="logo">logo顯示</option>
+                  <option value="text">字樣顯示</option>
+                </select>
+              ) : (
+                <span className="font-medium">{relationFilterDisplayList === "text" ? "字樣顯示" : "logo顯示"}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500">截止時間顯示設定(任務內)：</label>
+              {editingOtherDisplay ? (
+                <select value={dueDateDisplayDetailDraft} onChange={e => setDueDateDisplayDetailDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  <option value="raw">原始設定之截止時間</option>
+                  <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
+                  <option value="remaining_only">剩餘天數提示</option>
+                </select>
+              ) : (
+                <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayDetail]}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500">截止時間顯示設定(列表內)：</label>
+              {editingOtherDisplay ? (
+                <select value={dueDateDisplayListDraft} onChange={e => setDueDateDisplayListDraft(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                  <option value="raw">原始設定之截止時間</option>
+                  <option value="raw_plus_remaining">原始設定之截止時間 + 剩餘天數提示</option>
+                  <option value="remaining_only">剩餘天數提示</option>
+                </select>
+              ) : (
+                <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayList]}</span>
+              )}
+            </div>
+          </div>
+          <label className={"flex items-center gap-2 text-xs mt-3 pt-3 border-t border-slate-200 " + (editingOtherDisplay ? "text-slate-600" : "text-slate-400")}>
+            <input type="checkbox" disabled={!editingOtherDisplay} checked={editingOtherDisplay ? dueDateColorOverrideDraft : dueDateColorOverride}
+              onChange={e => setDueDateColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+            截止時間文字顯示覆蓋顏色
+          </label>
+          <label className={"flex items-center gap-2 text-xs mt-2 " + (editingOtherDisplay ? "text-slate-600" : "text-slate-400")}>
+            <input type="checkbox" disabled={!editingOtherDisplay} checked={editingOtherDisplay ? noProgressColorOverrideDraft : noProgressColorOverride}
+              onChange={e => setNoProgressColorOverrideDraft(e.target.checked)} className="w-4 h-4" />
+            無進度天數覆蓋顏色
+          </label>
+          <div className="flex items-center gap-2 text-xs mt-2">
+            <label className="text-slate-500">無進度天數(嚴重)設定：</label>
+            {editingOtherDisplay ? (
+              <input type="number" min="1" value={noProgressSeverityDaysDraft} onChange={e => setNoProgressSeverityDaysDraft(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1 w-16 bg-white" />
+            ) : (
+              <span className="font-medium">{noProgressSeverityDays}</span>
+            )}
+            <span className="text-slate-500">天</span>
+          </div>
+          <label className={"flex items-center gap-2 text-xs mt-2 " + (editingOtherDisplay ? "text-slate-600" : "text-slate-400")}>
+            <input type="checkbox" disabled={!editingOtherDisplay} checked={editingOtherDisplay ? forceShowSortColumnDraft : forceShowSortColumn}
+              onChange={e => setForceShowSortColumnDraft(e.target.checked)} className="w-4 h-4" />
+            當選定排序模式，則暫時忽略設定裡該欄位隱藏與否，無條件顯示在第一欄
+          </label>
+          <div className="flex items-center gap-2 text-xs mt-2">
+            <label className="text-slate-500">記住排序原則：</label>
+            {editingOtherDisplay ? (
+              <select value={rememberSortModeDraft} onChange={e => setRememberSortModeDraft(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                <option value="last_used">上次停留選項(預設)</option>
+                {Object.entries(SORT_MODE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+            ) : (
+              <span className="font-medium">{rememberSortMode === "last_used" ? "上次停留選項(預設)" : SORT_MODE_LABELS[rememberSortMode]}</span>
             )}
           </div>
+          <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。上方核選區與任務列表內可以各自獨立設定。截止時間的三種顯示模式、以及剩餘天數的顏色覆蓋，任務內頁與任務列表也可以分開設定。</p>
+          {editingOtherDisplay && (
+            <div className="flex gap-2 mt-3">
+              <button onClick={saveOtherDisplay} disabled={savingOtherDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingOtherDisplay ? "儲存中…" : "儲存"}</button>
+              <button onClick={() => setEditingOtherDisplay(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2816,7 +3004,21 @@ function Dashboard({ session, profile, setProfile }) {
   const [notifs, setNotifs] = useState([]);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [sortMode, setSortMode] = useState("created_desc"); // created_desc | due_asc | priority_desc
+  const [sortMode, setSortMode] = useState(() => (
+    profile.remember_sort_mode && profile.remember_sort_mode !== "last_used"
+      ? profile.remember_sort_mode
+      : (profile.last_sort_mode || "created_desc")
+  )); // created_desc | due_asc | priority_desc | priority_first | scale_asc | scale_desc | procrastination_desc
+
+  // 依「記住排序原則」設定：選了固定模式就不寫回去（每次都回到那個模式）；
+  // 選「上次停留選項」才把這次選的排序模式存回 profile，下次開啟/切分頁時記得
+  function chooseSortMode(setter, mode) {
+    setter(mode);
+    if (!profile.remember_sort_mode || profile.remember_sort_mode === "last_used") {
+      setProfile(p => ({ ...p, last_sort_mode: mode }));
+      sb.from("profiles").update({ last_sort_mode: mode }).eq("id", profile.id);
+    }
+  }
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
   const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
   const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
@@ -2984,7 +3186,11 @@ function Dashboard({ session, profile, setProfile }) {
   const abandonedMissions = visibleSorted.filter(m => m.status === "abandoned");
   const hiddenMissions = sortedMissions.filter(m => hiddenSet.has(m.id));
 
-  const [ganttSortMode, setGanttSortMode] = useState("created_desc");
+  const [ganttSortMode, setGanttSortMode] = useState(() => (
+    profile.remember_sort_mode && profile.remember_sort_mode !== "last_used"
+      ? profile.remember_sort_mode
+      : (profile.last_sort_mode || "created_desc")
+  ));
   const ganttMissions = sortMissions(
     relationFilteredPersonal.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
     ganttSortMode,
@@ -3133,17 +3339,19 @@ function Dashboard({ session, profile, setProfile }) {
                 {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
               </p>
               <div className="flex gap-1 text-xs flex-wrap">
-                <button onClick={() => setSortMode("created_desc")}
+                <button onClick={() => chooseSortMode(setSortMode, "created_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-                <button onClick={() => setSortMode("due_asc")}
+                <button onClick={() => chooseSortMode(setSortMode, "due_asc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-                <button onClick={() => setSortMode("priority_desc")}
+                <button onClick={() => chooseSortMode(setSortMode, "priority_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-                <button onClick={() => setSortMode("scale_asc")}
+                <button onClick={() => chooseSortMode(setSortMode, "priority_first")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+                <button onClick={() => chooseSortMode(setSortMode, "scale_asc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
-                <button onClick={() => setSortMode("scale_desc")}
+                <button onClick={() => chooseSortMode(setSortMode, "scale_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
-                <button onClick={() => setSortMode("procrastination_desc")}
+                <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
               </div>
             </div>
@@ -3155,26 +3363,26 @@ function Dashboard({ session, profile, setProfile }) {
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                <MissionListView missions={openMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                <MissionListView missions={completedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                <MissionListView missions={abandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                <MissionListView missions={hiddenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
               </section>
             )}
           </div>
@@ -3183,17 +3391,19 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "list" && personalViewMode === "gantt" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4 flex justify-end">
             <div className="flex gap-1 text-xs flex-wrap">
-              <button onClick={() => setGanttSortMode("created_desc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "created_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-              <button onClick={() => setGanttSortMode("due_asc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "due_asc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-              <button onClick={() => setGanttSortMode("priority_desc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "priority_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-              <button onClick={() => setGanttSortMode("scale_asc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "priority_first")}
+                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+              <button onClick={() => chooseSortMode(setGanttSortMode, "scale_asc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
-              <button onClick={() => setGanttSortMode("scale_desc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "scale_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
-              <button onClick={() => setGanttSortMode("procrastination_desc")}
+              <button onClick={() => chooseSortMode(setGanttSortMode, "procrastination_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
             </div>
           </div>
@@ -3287,19 +3497,19 @@ function Dashboard({ session, profile, setProfile }) {
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                    <MissionListView missions={projectOpenMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="created_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                    <MissionListView missions={projectCompletedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="created_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} />
+                    <MissionListView missions={projectAbandonedMissions} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="created_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
                   </section>
                 )}
               </>
@@ -3309,17 +3519,19 @@ function Dashboard({ session, profile, setProfile }) {
               <>
                 <div className="bg-white rounded-2xl shadow p-4 flex justify-end">
                   <div className="flex gap-1 text-xs flex-wrap">
-                    <button onClick={() => setGanttSortMode("created_desc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "created_desc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-                    <button onClick={() => setGanttSortMode("due_asc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "due_asc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-                    <button onClick={() => setGanttSortMode("priority_desc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "priority_desc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-                    <button onClick={() => setGanttSortMode("scale_asc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "priority_first")}
+                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "scale_asc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
-                    <button onClick={() => setGanttSortMode("scale_desc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "scale_desc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
-                    <button onClick={() => setGanttSortMode("procrastination_desc")}
+                    <button onClick={() => chooseSortMode(setGanttSortMode, "procrastination_desc")}
                       className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
                   </div>
                 </div>
