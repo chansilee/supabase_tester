@@ -1650,6 +1650,7 @@ function SettingsView({ profile, onProfileChange }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [msg, setMsg] = useState(null);
+  const [confirmRemoveFriend, setConfirmRemoveFriend] = useState(null);
 
   // 以下這些「已儲存的值」都直接從 profile 讀取（而不是自己另外存一份 state），
   // 這樣只要 profile 因為 Realtime 從別的裝置同步更新，畫面就會自動跟著換，不用重新整理
@@ -1910,8 +1911,13 @@ function SettingsView({ profile, onProfileChange }) {
     if (!error) loadFriends();
   }
 
-  async function removeFriend(friendshipId, friendName) {
-    if (!window.confirm(`確定要刪除好友「${friendName}」嗎？刪除後彼此將看不到對方之後建立的分享任務。`)) return;
+  function removeFriend(friendshipId, friendName) {
+    setConfirmRemoveFriend({ friendshipId, friendName });
+  }
+
+  async function doRemoveFriend() {
+    const { friendshipId } = confirmRemoveFriend;
+    setConfirmRemoveFriend(null);
     const { error } = await sb.from("friendships").delete().eq("id", friendshipId);
     if (!error) loadFriends();
     else setMsg({ type: "err", text: error.message });
@@ -2330,6 +2336,16 @@ function SettingsView({ profile, onProfileChange }) {
         </div>
       </div>
     </div>
+    {confirmRemoveFriend && (
+      <ConfirmModal
+        title="刪除好友"
+        message={`確定要刪除好友「${confirmRemoveFriend.friendName}」嗎？刪除後彼此將看不到對方之後建立的分享任務。`}
+        confirmLabel="確定刪除"
+        danger
+        onConfirm={doRemoveFriend}
+        onCancel={() => setConfirmRemoveFriend(null)}
+      />
+    )}
     </>
   );
 }
