@@ -572,6 +572,16 @@ function UsersTab({ currentUserId }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Realtime：任何人的 profiles（等級）或 missions（任務）有變動，就重新抓一次統計資料
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("admin-users-overview")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "missions" }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
+
   const statsByUser = useMemo(() => {
     const map = {};
     for (const m of missions) {
