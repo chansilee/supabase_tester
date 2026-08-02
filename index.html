@@ -3016,7 +3016,8 @@ function Dashboard({ session, profile, setProfile }) {
     setter(mode);
     if (!profile.remember_sort_mode || profile.remember_sort_mode === "last_used") {
       setProfile(p => ({ ...p, last_sort_mode: mode }));
-      sb.from("profiles").update({ last_sort_mode: mode }).eq("id", profile.id);
+      sb.from("profiles").update({ last_sort_mode: mode }).eq("id", profile.id)
+        .then(({ error }) => { if (error) console.error("儲存排序模式失敗：", error); });
     }
   }
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
@@ -3186,14 +3187,9 @@ function Dashboard({ session, profile, setProfile }) {
   const abandonedMissions = visibleSorted.filter(m => m.status === "abandoned");
   const hiddenMissions = sortedMissions.filter(m => hiddenSet.has(m.id));
 
-  const [ganttSortMode, setGanttSortMode] = useState(() => (
-    profile.remember_sort_mode && profile.remember_sort_mode !== "last_used"
-      ? profile.remember_sort_mode
-      : (profile.last_sort_mode || "created_desc")
-  ));
   const ganttMissions = sortMissions(
     relationFilteredPersonal.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
-    ganttSortMode,
+    sortMode,
     profile.priority_weights
   );
 
@@ -3207,7 +3203,7 @@ function Dashboard({ session, profile, setProfile }) {
   const projectAbandonedMissions = projectAllMissions.filter(m => m.status === "abandoned");
   const projectGanttMissions = sortMissions(
     projectMissionsFiltered.filter(m => (m.status === "added" || m.status === "in_progress") && !hiddenSet.has(m.id)),
-    ganttSortMode,
+    sortMode,
     profile.priority_weights
   );
 
@@ -3391,20 +3387,20 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "list" && personalViewMode === "gantt" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4 flex justify-end">
             <div className="flex gap-1 text-xs flex-wrap">
-              <button onClick={() => chooseSortMode(setGanttSortMode, "created_desc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "due_asc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "priority_desc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "priority_first")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "scale_asc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "scale_desc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
-              <button onClick={() => chooseSortMode(setGanttSortMode, "procrastination_desc")}
-                className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+              <button onClick={() => chooseSortMode(setSortMode, "created_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+              <button onClick={() => chooseSortMode(setSortMode, "due_asc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+              <button onClick={() => chooseSortMode(setSortMode, "priority_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+              <button onClick={() => chooseSortMode(setSortMode, "priority_first")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+              <button onClick={() => chooseSortMode(setSortMode, "scale_asc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+              <button onClick={() => chooseSortMode(setSortMode, "scale_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+              <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
             </div>
           </div>
         )}
@@ -3519,20 +3515,20 @@ function Dashboard({ session, profile, setProfile }) {
               <>
                 <div className="bg-white rounded-2xl shadow p-4 flex justify-end">
                   <div className="flex gap-1 text-xs flex-wrap">
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "created_desc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "due_asc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "priority_desc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "priority_first")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "scale_asc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "scale_desc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
-                    <button onClick={() => chooseSortMode(setGanttSortMode, "procrastination_desc")}
-                      className={"px-3 py-1.5 rounded-lg " + (ganttSortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "created_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "due_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "priority_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "priority_first")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "scale_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "scale_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
                   </div>
                 </div>
                 <GanttView missions={projectGanttMissions} onOpen={setOpenMissionId} />
