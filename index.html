@@ -632,9 +632,10 @@ function noProgressDaysInt(updatedAt) {
   const hours = (Date.now() - new Date(updatedAt).getTime()) / 3600000;
   return hours < 24 ? 0 : Math.floor(hours / 24);
 }
-function noProgressText(updatedAt) {
+function noProgressText(updatedAt, status) {
   const days = noProgressDaysInt(updatedAt);
-  return days === 0 ? "本日有進度" : `無進度${days}天`;
+  if (days === 0) return status === "added" ? "尚未開始" : "本日有進度";
+  return `無進度${days}天`;
 }
 // 無進度天數顏色：0 天（本日有進度）＝不急的綠色端，達到「嚴重度天數」門檻＝緊急的紅色端，中間線性內插，超過門檻固定顯示紅色端
 function noProgressColor(updatedAt, severityDays) {
@@ -652,6 +653,7 @@ const SORT_MODE_LABELS = {
   scale_asc: "小任務優先",
   scale_desc: "大任務優先",
   procrastination_desc: "拖延優先",
+  updated_desc: "依最後更新",
 };
 
 // 排序模式對應到要淡色遮罩標示的欄位（可能不只一欄，例如優先級分數同時參考重要性與緊急度）
@@ -664,6 +666,7 @@ const SORT_MODE_HIGHLIGHT_COLUMNS = {
   scale_desc: ["scale"],
   procrastination_desc: ["no_progress_days", "status"],
   closed_desc: ["closed_at"],
+  updated_desc: ["updated_at"],
 };
 
 // 特殊色欄位遮罩：跟原本藍色維持同樣的飽和度/明度，只換色相，供使用者自行挑選
@@ -833,6 +836,8 @@ function sortMissions(list, mode, weights) {
     arr.sort((a, b) => (b.scale || 1) - (a.scale || 1) || overallPriorityScore(b, weights) - overallPriorityScore(a, weights));
   } else if (mode === "procrastination_desc") {
     arr.sort((a, b) => procrastinationTier(a.status) - procrastinationTier(b.status) || procrastinationDays(b) - procrastinationDays(a));
+  } else if (mode === "updated_desc") {
+    arr.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
   } else {
     arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
@@ -1323,7 +1328,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   <span>{fmt(u.created_at)}</span>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{u.content}</p>
-                {u.author_id === currentUser.id && (
+                {u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
                   <div className="flex justify-end mt-1">
                     <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
                       <Icon.Trash className="w-4 h-4" />
@@ -1456,8 +1461,8 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
       case "procrastination_days": return td(key, procrastinationDays(m).toFixed(1) + "天", "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "no_progress_days": return td(key,
         noProgressColorOverride
-          ? <span style={{ color: noProgressColor(m.updated_at, noProgressSeverityDays) }}>{noProgressText(m.updated_at)}</span>
-          : noProgressText(m.updated_at),
+          ? <span style={{ color: noProgressColor(m.updated_at, noProgressSeverityDays) }}>{noProgressText(m.updated_at, m.status)}</span>
+          : noProgressText(m.updated_at, m.status),
         "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle
       );
       case "title": return td(key, m.title, "px-4 py-3 font-medium", null, rowStarStyle);
@@ -1468,15 +1473,6 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
       case "status": return td(key, <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>, null, null, rowStarStyle);
       case "action": return td(key, (
         <div className="flex items-center gap-2">
-          {isHidden ? (
-            <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
-              <Icon.Show className="w-4 h-4" />
-            </button>
-          ) : !isOwn ? (
-            <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
-              <Icon.Hidden className="w-4 h-4" />
-            </button>
-          ) : null}
           {isOpenStatus && !isHidden && (
             isStarred ? (
               <button onClick={() => onUnstar(m.id)} title="取消關注" className="flex items-center justify-center text-emerald-600 hover:text-emerald-700">
@@ -1488,6 +1484,15 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
               </button>
             )
           )}
+          {isHidden ? (
+            <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
+              <Icon.Show className="w-4 h-4" />
+            </button>
+          ) : !isOwn ? (
+            <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
+              <Icon.Hidden className="w-4 h-4" />
+            </button>
+          ) : null}
           {isOwn && (
             <button onClick={() => setConfirmDeleteId(m.id)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
               <Icon.Trash className="w-4 h-4" />
@@ -3468,6 +3473,8 @@ function Dashboard({ session, profile, setProfile }) {
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
                 <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
                   className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                <button onClick={() => chooseSortMode(setSortMode, "updated_desc")}
+                  className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
               </div>
             </div>
           </div>
@@ -3526,6 +3533,8 @@ function Dashboard({ session, profile, setProfile }) {
                 className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
               <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
                 className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+              <button onClick={() => chooseSortMode(setSortMode, "updated_desc")}
+                className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
             </div>
           </div>
         )}
@@ -3660,6 +3669,8 @@ function Dashboard({ session, profile, setProfile }) {
                       className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
                     <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
                       className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "updated_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
                   </div>
                 </div>
                 <GanttView missions={projectGanttMissions} onOpen={setOpenMissionId} />
