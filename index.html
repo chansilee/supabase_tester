@@ -3167,6 +3167,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [notifs, setNotifs] = useState([]);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [searchMatchedUpdateMissionIds, setSearchMatchedUpdateMissionIds] = useState([]);
   const [sortMode, setSortMode] = useState(() => (
     profile.remember_sort_mode && profile.remember_sort_mode !== "last_used"
       ? profile.remember_sort_mode
@@ -3356,7 +3357,10 @@ function Dashboard({ session, profile, setProfile }) {
   const searchedMissions = appliedSearch
     ? relationFilteredPersonal.filter(m => {
         const q = appliedSearch.toLowerCase();
-        return (m.title || "").toLowerCase().includes(q) || (m.content || "").toLowerCase().includes(q);
+        return (m.title || "").toLowerCase().includes(q)
+          || (m.content || "").toLowerCase().includes(q)
+          || (m.final_comment || "").toLowerCase().includes(q)
+          || searchMatchedUpdateMissionIds.includes(m.id);
       })
     : relationFilteredPersonal;
 
@@ -3396,6 +3400,19 @@ function Dashboard({ session, profile, setProfile }) {
 
   function runSearch() { setAppliedSearch(searchInput.trim()); }
   function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
+
+  // 搜尋時，順便去「更新紀錄」（mission_updates 的留言內容）裡比對是否有符合的內容，
+  // RLS 本來就只會回傳這個使用者看得到的任務底下的留言，不需要額外過濾可見範圍
+  useEffect(() => {
+    if (!appliedSearch.trim()) { setSearchMatchedUpdateMissionIds([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await sb.from("mission_updates").select("mission_id").ilike("content", `%${appliedSearch}%`);
+      if (!cancelled) setSearchMatchedUpdateMissionIds((data || []).map(r => r.mission_id));
+    })();
+    return () => { cancelled = true; };
+  }, [appliedSearch]);
+
   async function toggleColumn(key) {
     const updated = { ...visibleColumns, [key]: !visibleColumns[key] };
     setVisibleColumns(updated);
@@ -3528,7 +3545,7 @@ function Dashboard({ session, profile, setProfile }) {
             <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
               <p className="text-xs text-slate-500">
                 {appliedSearch
-                  ? `目前顯示是所有標題和內文含有「${appliedSearch}」的搜尋結果，共 ${sortedMissions.length} 筆`
+                  ? `目前顯示是標題、內文、最終評論或更新紀錄留言含有「${appliedSearch}」的搜尋結果，共 ${sortedMissions.length} 筆`
                   : `目前顯示全部任務，共 ${sortedMissions.length} 筆`}
                 {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
               </p>
