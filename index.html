@@ -1178,7 +1178,28 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, onClose, onChanged }) {
+function ProjectPickerModal({ projects, onPick, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[70vh] overflow-y-auto p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">選擇要移入的專案</h2>
+          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+        <div className="space-y-2">
+          {projects.length === 0 && <p className="text-sm text-slate-400">目前沒有可選擇的專案</p>}
+          {projects.map(p => (
+            <button key={p.id} onClick={() => onPick(p)} className="w-full text-left bg-slate-50 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm">
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [projectMembers, setProjectMembers] = useState([]);
@@ -1195,6 +1216,10 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [confirmDeleteUpdateId, setConfirmDeleteUpdateId] = useState(null);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState(null); // { type: "to_personal" } | { type: "to_project", project }
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState(null);
 
   const load = useCallback(async () => {
     const { data: m } = await sb.from("missions")
@@ -1267,6 +1292,32 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     else await load();
   }
 
+  function startSwitch() {
+    setSwitchError(null);
+    if (mission.project_id) setConfirmSwitch({ type: "to_personal" });
+    else setShowProjectPicker(true);
+  }
+  function pickProject(project) {
+    setShowProjectPicker(false);
+    setConfirmSwitch({ type: "to_project", project });
+  }
+  async function confirmSwitchAction() {
+    setSwitchBusy(true); setSwitchError(null);
+    try {
+      const { error } = confirmSwitch.type === "to_personal"
+        ? await sb.rpc("move_mission_to_personal", { p_mission_id: missionId })
+        : await sb.rpc("move_mission_to_project", { p_mission_id: missionId, p_project_id: confirmSwitch.project.id });
+      if (error) throw error;
+      setConfirmSwitch(null);
+      await load();
+      onChanged();
+    } catch (e2) {
+      setSwitchError(e2.message);
+    } finally {
+      setSwitchBusy(false);
+    }
+  }
+
   async function saveBodyEdit() {
     setBusy(true); setErr(null);
     try {
@@ -1297,12 +1348,18 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   }
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-start mb-4">
           <div>
             <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
             <span className="ml-2 text-xs text-slate-400">{typeLabel}{mission.project_id ? `（${mission.project?.name}）` : ""}</span>
+            {isCreator && (
+              <button onClick={startSwitch} className="ml-2 inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 hover:bg-slate-200">
+                {mission.project_id ? "切至個人專案" : "切至專案內"}
+              </button>
+            )}
           </div>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
@@ -1450,6 +1507,40 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         )}
       </div>
     </div>
+
+    {showProjectPicker && (
+      <ProjectPickerModal
+        projects={(projects || []).filter(p => p.id !== mission.project_id)}
+        onPick={pickProject}
+        onClose={() => setShowProjectPicker(false)}
+      />
+    )}
+
+    {confirmSwitch && (
+      <ConfirmModal
+        title="切換任務歸屬"
+        message={
+          confirmSwitch.type === "to_personal"
+            ? "確定要將此任務移出目前的專案、退回個人任務嗎？\n（若指派對象並非您的個人好友，系統將無法完成這個動作）"
+            : `確定將此任務移入專案「${confirmSwitch.project.name}」嗎？\n（若指派對象目前不是該專案成員，且您是該專案的擁有者，系統會一併將對方加入為專案成員；若您不是擁有者，指派對象又不在該專案內，則無法完成）`
+        }
+        confirmLabel={switchBusy ? "處理中…" : "確定"}
+        onConfirm={confirmSwitchAction}
+        onCancel={() => setConfirmSwitch(null)}
+      />
+    )}
+
+    {switchError && (
+      <ConfirmModal
+        title="無法切換任務歸屬"
+        message={switchError}
+        confirmLabel="確定"
+        hideCancel
+        onConfirm={() => setSwitchError(null)}
+        onCancel={() => setSwitchError(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -1553,15 +1644,17 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
               </button>
             )
           )}
-          {isHidden ? (
-            <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
-              <Icon.Show className="w-4 h-4" />
-            </button>
-          ) : !isOwn ? (
-            <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
-              <Icon.Hidden className="w-4 h-4" />
-            </button>
-          ) : null}
+          {!m.project_id && (
+            isHidden ? (
+              <button onClick={() => onUnhide(m.id)} title="取消隱藏" className="flex items-center justify-center text-blue-600 hover:text-blue-700">
+                <Icon.Show className="w-4 h-4" />
+              </button>
+            ) : !isOwn ? (
+              <button onClick={() => onHide(m.id)} title="隱藏" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
+                <Icon.Hidden className="w-4 h-4" />
+              </button>
+            ) : null
+          )}
           {isOwn && (
             <button onClick={() => setConfirmDeleteId(m.id)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
               <Icon.Trash className="w-4 h-4" />
@@ -2102,14 +2195,17 @@ function SettingsView({ profile, onProfileChange }) {
 
   const sortHighlightColor = profile.sort_highlight_color || "blue";
   const starOverrideColor = profile.star_override_color || "none";
+  const searchHighlightColor = profile.search_highlight_color || "none";
   const [editingSortColor, setEditingSortColor] = useState(false);
   const [sortHighlightColorDraft, setSortHighlightColorDraft] = useState(sortHighlightColor);
   const [starOverrideColorDraft, setStarOverrideColorDraft] = useState(starOverrideColor);
+  const [searchHighlightColorDraft, setSearchHighlightColorDraft] = useState(searchHighlightColor);
   const [savingSortColor, setSavingSortColor] = useState(false);
 
   function startEditSortColor() {
     setSortHighlightColorDraft(sortHighlightColor);
     setStarOverrideColorDraft(starOverrideColor);
+    setSearchHighlightColorDraft(searchHighlightColor);
     setEditingSortColor(true);
   }
   async function saveSortColor() {
@@ -2117,10 +2213,11 @@ function SettingsView({ profile, onProfileChange }) {
     const { error } = await sb.from("profiles").update({
       sort_highlight_color: sortHighlightColorDraft,
       star_override_color: starOverrideColorDraft,
+      search_highlight_color: searchHighlightColorDraft,
     }).eq("id", profile.id);
     setSavingSortColor(false);
     if (!error) {
-      onProfileChange({ ...profile, sort_highlight_color: sortHighlightColorDraft, star_override_color: starOverrideColorDraft });
+      onProfileChange({ ...profile, sort_highlight_color: sortHighlightColorDraft, star_override_color: starOverrideColorDraft, search_highlight_color: searchHighlightColorDraft });
       setEditingSortColor(false);
     } else {
       setMsg({ type: "err", text: error.message });
@@ -2502,6 +2599,18 @@ function SettingsView({ profile, onProfileChange }) {
               </select>
             ) : (
               <span className="font-medium">{starOverrideColor === "none" ? "無覆蓋" : SORT_HIGHLIGHT_COLORS[starOverrideColor]?.label}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs mt-2">
+            <label className="text-slate-500">搜索時欄位遮色：</label>
+            {editingSortColor ? (
+              <select value={searchHighlightColorDraft} onChange={e => setSearchHighlightColorDraft(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                <option value="none">無覆蓋</option>
+                {Object.entries(SORT_HIGHLIGHT_COLORS).map(([key, c]) => <option key={key} value={key}>{c.label}</option>)}
+              </select>
+            ) : (
+              <span className="font-medium">{searchHighlightColor === "none" ? "無覆蓋" : SORT_HIGHLIGHT_COLORS[searchHighlightColor]?.label}</span>
             )}
           </div>
           {editingSortColor && (
@@ -3184,6 +3293,9 @@ function Dashboard({ session, profile, setProfile }) {
         .then(({ error }) => { if (error) console.error("儲存排序模式失敗：", error); });
     }
   }
+  // 搜尋大框框的遮色：只有在搜尋條件不是空白（appliedSearch 有值）時才套用，清空搜尋就解除
+  const searchColorEntry = profile.search_highlight_color && profile.search_highlight_color !== "none" ? SORT_HIGHLIGHT_COLORS[profile.search_highlight_color] : null;
+  const searchBoxStyle = (appliedSearch && searchColorEntry) ? { background: `rgba(${hexToRgbString(searchColorEntry.hex)},0.15)` } : undefined;
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
   const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
   const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
@@ -3290,10 +3402,11 @@ function Dashboard({ session, profile, setProfile }) {
   async function deleteProject() {
     setProjectDeleteErr(null);
     setShowDeleteProjectConfirm(false);
-    const { error } = await sb.from("projects").delete().eq("id", openProjectId);
+    const { error } = await sb.rpc("delete_project_release_missions", { p_project_id: openProjectId });
     if (!error) {
       setOpenProjectId(null);
       loadProjects();
+      loadMissions();
     } else {
       setProjectDeleteErr(error.message);
     }
@@ -3386,7 +3499,16 @@ function Dashboard({ session, profile, setProfile }) {
   const projectMissionsRaw = visibleMissions.filter(m => m.project_id === openProjectId);
   const projectOpenMissionsAll = projectMissionsRaw.filter(m => m.status === "added" || m.status === "in_progress");
   const projectMissionsFiltered = projectMissionsRaw.filter(m => relationFilter[relationCategory(m, profile.id)]);
-  const projectAllMissions = sortMissions(projectMissionsFiltered, "created_desc", profile.priority_weights);
+  const projectSearchedMissions = appliedSearch
+    ? projectMissionsFiltered.filter(m => {
+        const q = appliedSearch.toLowerCase();
+        return (m.title || "").toLowerCase().includes(q)
+          || (m.content || "").toLowerCase().includes(q)
+          || (m.final_comment || "").toLowerCase().includes(q)
+          || searchMatchedUpdateMissionIds.includes(m.id);
+      })
+    : projectMissionsFiltered;
+  const projectAllMissions = sortMissions(projectSearchedMissions, sortMode, profile.priority_weights);
   const projectOpenMissionsUnsorted = projectAllMissions.filter(m => m.status === "added" || m.status === "in_progress");
   const projectStarredMissions = projectOpenMissionsUnsorted.filter(m => starredSet.has(m.id));
   const projectOpenMissions = projectOpenMissionsUnsorted.filter(m => !starredSet.has(m.id));
@@ -3532,7 +3654,7 @@ function Dashboard({ session, profile, setProfile }) {
         )}
 
         {tab === "list" && personalViewMode === "list" && (
-          <div className="bg-white rounded-2xl shadow p-4 mb-4">
+          <div className="bg-white rounded-2xl shadow p-4 mb-4" style={searchBoxStyle}>
             <div className="flex gap-2">
               <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && runSearch()}
@@ -3678,7 +3800,7 @@ function Dashboard({ session, profile, setProfile }) {
                         <Icon.Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => projectOpenMissionsAll.length > 0 ? setShowDeleteBlockedInfo(true) : setShowDeleteProjectConfirm(true)}
+                        onClick={() => setShowDeleteProjectConfirm(true)}
                         title="刪除專案"
                         className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9"
                       >
@@ -3693,38 +3815,68 @@ function Dashboard({ session, profile, setProfile }) {
             {showDeleteProjectConfirm && (
               <ConfirmModal
                 title="刪除專案"
-                message={`確定要永久刪除專案「${currentProject.name}」嗎？\n此動作無法復原，底下所有任務與回覆紀錄都會一併刪除。`}
+                message={`確定要刪除專案「${currentProject.name}」嗎？\n此動作無法復原：專案底下所有任務（不分狀態）都會自動退回各自建立者名下的「個人任務」以避免遺失；若任務的指派對象不是建立者的個人好友，系統會將該任務強制改回指派給建立者自己。專案本身與成員名單刪除後將無法復原。`}
                 confirmLabel="確認刪除"
                 danger
                 onConfirm={deleteProject}
                 onCancel={() => setShowDeleteProjectConfirm(false)}
               />
             )}
-            {showDeleteBlockedInfo && (
-              <ConfirmModal
-                title="無法刪除此專案"
-                hideCancel
-                confirmLabel="我知道了"
-                message={`還有 ${projectOpenMissionsAll.length} 筆未結案任務（已新增／進行中），需先轉指派、完成或棄置後才能刪除專案。\n\n` + projectOpenMissionsAll.map(t => `．${t.title}`).join("\n")}
-                onConfirm={() => setShowDeleteBlockedInfo(false)}
-                onCancel={() => setShowDeleteBlockedInfo(false)}
-              />
-            )}
 
             <RelationFilterBar options={RELATION_FILTERS_PROJECT} value={relationFilter} onChange={toggleRelation} displayMode={profile.relation_filter_display_top} />
+
+            {projectViewMode === "list" && (
+              <div className="bg-white rounded-2xl shadow p-4 mb-4" style={searchBoxStyle}>
+                <div className="flex gap-2">
+                  <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && runSearch()}
+                    placeholder="搜尋任務標題或內文…"
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                  <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
+                    <Icon.Search className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
+                  <p className="text-xs text-slate-500">
+                    {appliedSearch
+                      ? `目前顯示是標題、內文、最終評論或更新紀錄留言含有「${appliedSearch}」的搜尋結果，共 ${projectAllMissions.length} 筆`
+                      : `目前顯示全部任務，共 ${projectAllMissions.length} 筆`}
+                    {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
+                  </p>
+                  <div className="flex gap-1 text-xs flex-wrap">
+                    <button onClick={() => chooseSortMode(setSortMode, "created_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "due_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "priority_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "priority_first")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "scale_asc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "scale_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                    <button onClick={() => chooseSortMode(setSortMode, "updated_desc")}
+                      className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {projectViewMode === "list" && (
               <>
                 {projectStarredMissions.length > 0 && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{projectStarredMissions.length}）</h3>
-                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="created_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
                   </section>
                 )}
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="created_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
                   </section>
                 )}
                 {visibleSections.completed && (
@@ -3820,7 +3972,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
