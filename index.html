@@ -1178,7 +1178,28 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 // =====================================================================
 // 任務詳情 Modal
 // =====================================================================
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, onClose, onChanged }) {
+function ProjectPickerModal({ projects, onPick, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[70vh] overflow-y-auto p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">選擇要移入的專案</h2>
+          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+        <div className="space-y-2">
+          {projects.length === 0 && <p className="text-sm text-slate-400">目前沒有可選擇的專案</p>}
+          {projects.map(p => (
+            <button key={p.id} onClick={() => onPick(p)} className="w-full text-left bg-slate-50 hover:bg-slate-100 rounded-lg px-3 py-2 text-sm">
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [projectMembers, setProjectMembers] = useState([]);
@@ -1195,6 +1216,10 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [confirmDeleteUpdateId, setConfirmDeleteUpdateId] = useState(null);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState(null); // { type: "to_personal" } | { type: "to_project", project }
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchError, setSwitchError] = useState(null);
 
   const load = useCallback(async () => {
     const { data: m } = await sb.from("missions")
@@ -1267,6 +1292,32 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     else await load();
   }
 
+  function startSwitch() {
+    setSwitchError(null);
+    if (mission.project_id) setConfirmSwitch({ type: "to_personal" });
+    else setShowProjectPicker(true);
+  }
+  function pickProject(project) {
+    setShowProjectPicker(false);
+    setConfirmSwitch({ type: "to_project", project });
+  }
+  async function confirmSwitchAction() {
+    setSwitchBusy(true); setSwitchError(null);
+    try {
+      const { error } = confirmSwitch.type === "to_personal"
+        ? await sb.rpc("move_mission_to_personal", { p_mission_id: missionId })
+        : await sb.rpc("move_mission_to_project", { p_mission_id: missionId, p_project_id: confirmSwitch.project.id });
+      if (error) throw error;
+      setConfirmSwitch(null);
+      await load();
+      onChanged();
+    } catch (e2) {
+      setSwitchError(e2.message);
+    } finally {
+      setSwitchBusy(false);
+    }
+  }
+
   async function saveBodyEdit() {
     setBusy(true); setErr(null);
     try {
@@ -1297,12 +1348,18 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   }
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-start mb-4">
           <div>
             <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
             <span className="ml-2 text-xs text-slate-400">{typeLabel}{mission.project_id ? `（${mission.project?.name}）` : ""}</span>
+            {isCreator && (
+              <button onClick={startSwitch} className="ml-2 inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 hover:bg-slate-200">
+                {mission.project_id ? "切至個人專案" : "切至專案內"}
+              </button>
+            )}
           </div>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
@@ -1450,6 +1507,40 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         )}
       </div>
     </div>
+
+    {showProjectPicker && (
+      <ProjectPickerModal
+        projects={(projects || []).filter(p => p.id !== mission.project_id)}
+        onPick={pickProject}
+        onClose={() => setShowProjectPicker(false)}
+      />
+    )}
+
+    {confirmSwitch && (
+      <ConfirmModal
+        title="切換任務歸屬"
+        message={
+          confirmSwitch.type === "to_personal"
+            ? "確定要將此任務移出目前的專案、退回個人任務嗎？\n（若指派對象並非您的個人好友，系統將無法完成這個動作）"
+            : `確定將此任務移入專案「${confirmSwitch.project.name}」嗎？\n（若指派對象目前不是該專案成員，且您是該專案的擁有者，系統會一併將對方加入為專案成員；若您不是擁有者，指派對象又不在該專案內，則無法完成）`
+        }
+        confirmLabel={switchBusy ? "處理中…" : "確定"}
+        onConfirm={confirmSwitchAction}
+        onCancel={() => setConfirmSwitch(null)}
+      />
+    )}
+
+    {switchError && (
+      <ConfirmModal
+        title="無法切換任務歸屬"
+        message={switchError}
+        confirmLabel="確定"
+        hideCancel
+        onConfirm={() => setSwitchError(null)}
+        onCancel={() => setSwitchError(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -3290,10 +3381,11 @@ function Dashboard({ session, profile, setProfile }) {
   async function deleteProject() {
     setProjectDeleteErr(null);
     setShowDeleteProjectConfirm(false);
-    const { error } = await sb.from("projects").delete().eq("id", openProjectId);
+    const { error } = await sb.rpc("delete_project_release_missions", { p_project_id: openProjectId });
     if (!error) {
       setOpenProjectId(null);
       loadProjects();
+      loadMissions();
     } else {
       setProjectDeleteErr(error.message);
     }
@@ -3678,7 +3770,7 @@ function Dashboard({ session, profile, setProfile }) {
                         <Icon.Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => projectOpenMissionsAll.length > 0 ? setShowDeleteBlockedInfo(true) : setShowDeleteProjectConfirm(true)}
+                        onClick={() => setShowDeleteProjectConfirm(true)}
                         title="刪除專案"
                         className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9"
                       >
@@ -3693,21 +3785,11 @@ function Dashboard({ session, profile, setProfile }) {
             {showDeleteProjectConfirm && (
               <ConfirmModal
                 title="刪除專案"
-                message={`確定要永久刪除專案「${currentProject.name}」嗎？\n此動作無法復原，底下所有任務與回覆紀錄都會一併刪除。`}
+                message={`確定要刪除專案「${currentProject.name}」嗎？\n此動作無法復原：專案底下所有任務（不分狀態）都會自動退回各自建立者名下的「個人任務」以避免遺失；若任務的指派對象不是建立者的個人好友，系統會將該任務強制改回指派給建立者自己。專案本身與成員名單刪除後將無法復原。`}
                 confirmLabel="確認刪除"
                 danger
                 onConfirm={deleteProject}
                 onCancel={() => setShowDeleteProjectConfirm(false)}
-              />
-            )}
-            {showDeleteBlockedInfo && (
-              <ConfirmModal
-                title="無法刪除此專案"
-                hideCancel
-                confirmLabel="我知道了"
-                message={`還有 ${projectOpenMissionsAll.length} 筆未結案任務（已新增／進行中），需先轉指派、完成或棄置後才能刪除專案。\n\n` + projectOpenMissionsAll.map(t => `．${t.title}`).join("\n")}
-                onConfirm={() => setShowDeleteBlockedInfo(false)}
-                onCancel={() => setShowDeleteBlockedInfo(false)}
               />
             )}
 
@@ -3820,7 +3902,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
