@@ -1131,7 +1131,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             <div className="flex gap-2 mt-1">
               {PRIORITY_LEVELS.map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
-                  className={"flex-1 py-2 rounded-lg text-sm font-medium " + (priority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                  className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (priority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                   {renderPriorityText(priorityLabels, priorityDisplay, "detail_edit", p, priorityColorOverride)}
                 </button>
               ))}
@@ -1142,7 +1142,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             <div className="flex gap-2 mt-1">
               {SCALE_LEVELS.map(n => (
                 <button key={n} type="button" onClick={() => setScale(n)}
-                  className={"flex-1 py-2 rounded-lg text-sm font-medium " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                  className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                   {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                 </button>
               ))}
@@ -1166,7 +1166,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             </div>
           </div>
           {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
-          <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+          <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center disabled:opacity-50">
             {busy ? "建立中…" : "建立任務"}
           </button>
         </form>
@@ -1400,7 +1400,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div className="flex gap-2 mt-1">
                 {PRIORITY_LEVELS.map(p => (
                   <button key={p} type="button" onClick={() => setEditPriority(p)}
-                    className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editPriority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                    className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (editPriority === p ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                     {renderPriorityText(priorityLabels, priorityDisplay, "detail_edit", p, priorityColorOverride)}
                   </button>
                 ))}
@@ -1411,7 +1411,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div className="flex gap-2 mt-1">
                 {SCALE_LEVELS.map(n => (
                   <button key={n} type="button" onClick={() => setEditScale(n)}
-                    className={"flex-1 py-2 rounded-lg text-sm font-medium " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                    className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                     {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                   </button>
                 ))}
