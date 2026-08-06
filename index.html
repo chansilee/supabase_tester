@@ -240,12 +240,15 @@ table { border-collapse: collapse; width: 100%; }
 .h-5 { height: 1.25rem; }
 .w-6 { width: 1.5rem; }
 .h-6 { height: 1.5rem; }
+.h-2 { height: 0.5rem; }
 .h-8 { height: 2rem; }
 .w-7 { width: 1.75rem; }
 .h-7 { height: 1.75rem; }
 .w-72 { width: 18rem; }
 .w-8 { width: 2rem; }
 .w-9 { width: 2.25rem; }
+.w-20 { width: 5rem; }
+.overflow-hidden { overflow: hidden; }
 .h-9 { height: 2.25rem; }
 .shrink-0 { flex-shrink: 0; }
 .h-72 { height: 18rem; }
@@ -267,6 +270,7 @@ table { border-collapse: collapse; width: 100%; }
 .text-\[10px\] { font-size: 10px; }
 .text-\[11px\] { font-size: 11px; }
 .font-medium { font-weight: 500; }
+.line-through { text-decoration: line-through; }
 .font-semibold { font-weight: 600; }
 .font-bold { font-weight: 700; }
 .text-left { text-align: left; }
@@ -380,6 +384,7 @@ const TASK_LIST_COLUMNS = [
   { key: "urgency", label: "緊急度" },
   { key: "due_date", label: "截止時間" },
   { key: "status", label: "狀態" },
+  { key: "checklist_progress", label: "檢查清單進度" },
   { key: "action", label: "動作" },
   { key: "no_progress_days", label: "無進度天數" },
 ];
@@ -399,12 +404,13 @@ const TASK_LIST_COLUMNS_CLOSED = [
   { key: "priority", label: "重要性" },
   { key: "scale", label: "任務規模" },
   { key: "status", label: "狀態" },
+  { key: "checklist_progress", label: "檢查清單進度" },
   { key: "action", label: "動作" },
 ];
 const DEFAULT_VISIBLE_COLUMNS_CLOSED = {
   closed_at: true, created_at: false, creator: false, assignee: false, relation: false,
   updated_at: false, title: true, final_comment: true, priority: false, scale: false,
-  status: true, action: true,
+  status: true, checklist_progress: false, action: true,
 };
 
 const TASK_SECTIONS = [
@@ -710,6 +716,17 @@ function noProgressColor(updatedAt, severityDays) {
   const days = noProgressDaysInt(updatedAt);
   const t = Math.min(2, (days / (severityDays || 7)) * 2);
   return urgencyColor(t);
+}
+
+// 檢查清單完成度：沒有項目時回傳 null（不顯示）；全部勾完但任務本身還沒正式標記「已完成」時，
+// 封頂顯示 99%，真正的 100% 只保留給任務正式結案的那一刻
+function checklistProgress(items, missionStatus) {
+  if (!items || items.length === 0) return null;
+  const total = items.length;
+  const checked = items.filter(i => i.is_checked).length;
+  let pct = Math.floor((checked / total) * 100);
+  if (missionStatus !== "completed" && checked === total) pct = 99;
+  return pct;
 }
 
 // 排序模式對應的中文標籤（給「記住排序原則」下拉選單顯示用）
@@ -1088,8 +1105,19 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [priority, setPriority] = useState("P2");
   const [scale, setScale] = useState(1);
   const [assigneeId, setAssigneeId] = useState(currentUserId);
+  const [checklistDraft, setChecklistDraft] = useState([]);
+  const [checklistInput, setChecklistInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  function addChecklistDraftItem() {
+    if (!checklistInput.trim()) return;
+    setChecklistDraft(list => [...list, checklistInput.trim()]);
+    setChecklistInput("");
+  }
+  function removeChecklistDraftItem(i) {
+    setChecklistDraft(list => list.filter((_, idx) => idx !== i));
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -1104,8 +1132,13 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         priority, scale,
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
       };
-      const { error } = await sb.from("missions").insert(payload);
+      const { data: created, error } = await sb.from("missions").insert(payload).select("id").single();
       if (error) throw error;
+      if (checklistDraft.length > 0) {
+        const { error: clError } = await sb.from("mission_checklist_items")
+          .insert(checklistDraft.map(text => ({ mission_id: created.id, content: text })));
+        if (clError) throw clError;
+      }
       onCreated();
       onClose();
     } catch (e2) {
@@ -1115,7 +1148,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -1170,6 +1203,28 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
               </select>
             </div>
           </div>
+          <div className="border-t border-slate-200 pt-3">
+            <label className="text-xs text-slate-500">檢查清單（可留空，之後也能在任務內頁新增）</label>
+            {checklistDraft.length > 0 && (
+              <div className="space-y-1.5 mt-2">
+                {checklistDraft.map((text, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
+                    <span className="flex-1 text-sm text-slate-700">{text}</span>
+                    <button type="button" onClick={() => removeChecklistDraftItem(i)} title="移除" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                      <Icon.Trash className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 mt-2">
+              <input value={checklistInput} onChange={e => setChecklistInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addChecklistDraftItem(); } }}
+                maxLength={150} placeholder="輸入項目後按新增…"
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+              <button type="button" onClick={addChecklistDraftItem} className="bg-slate-100 text-slate-600 text-xs rounded-lg px-3 py-1.5">新增</button>
+            </div>
+          </div>
           {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
           <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center disabled:opacity-50">
             {busy ? "建立中…" : "建立任務"}
@@ -1207,6 +1262,9 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
 function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
+  const [checklist, setChecklist] = useState([]);
+  const [newChecklistText, setNewChecklistText] = useState("");
+  const [checklistErr, setChecklistErr] = useState(null);
   const [projectMembers, setProjectMembers] = useState([]);
   const [replyText, setReplyText] = useState("");
   const [finalComment, setFinalComment] = useState("");
@@ -1250,16 +1308,20 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
       .eq("mission_id", missionId).order("created_at", { ascending: true });
     setUpdates(u || []);
+    const { data: c } = await sb.from("mission_checklist_items")
+      .select("*").eq("mission_id", missionId).order("created_at", { ascending: true });
+    setChecklist(c || []);
   }, [missionId]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Realtime：這筆任務本身，或底下的回覆紀錄，只要有變動就重新整理詳情內容。
+  // Realtime：這筆任務本身、底下的回覆紀錄、或檢查清單，只要有變動就重新整理詳情內容。
   useEffect(() => {
     if (!sb) return;
     const channel = sb.channel("mission-detail-" + missionId)
       .on("postgres_changes", { event: "*", schema: "public", table: "missions", filter: `id=eq.${missionId}` }, () => load())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_updates", filter: `mission_id=eq.${missionId}` }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "mission_checklist_items", filter: `mission_id=eq.${missionId}` }, () => load())
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [missionId, load]);
@@ -1267,6 +1329,9 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   if (!mission) return null;
 
   const isCreator = mission.creator_id === currentUser.id;
+  const isAssignee = mission.assigned_id === currentUser.id;
+  const isClosed = mission.status === "completed" || mission.status === "abandoned";
+  const canToggleChecklist = (isCreator || isAssignee) && !isClosed;
   // 誰能看得到，誰就能回覆更新（跟資料庫 RLS 的可見範圍規則一致）
   const canReply = mission.status !== "completed" && mission.status !== "abandoned";
   const typeLabel = mission.project_id ? "專案任務" : (mission.assigned_id === mission.creator_id ? "私人任務" : "私人指派任務");
@@ -1294,6 +1359,27 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     setConfirmDeleteUpdateId(null);
     const { error } = await sb.from("mission_updates").delete().eq("id", updateId);
     if (error) setErr(error.message);
+    else await load();
+  }
+
+  async function addChecklistItem(e) {
+    e.preventDefault();
+    if (!newChecklistText.trim()) return;
+    setChecklistErr(null);
+    const { error } = await sb.from("mission_checklist_items").insert({ mission_id: missionId, content: newChecklistText.trim() });
+    if (error) setChecklistErr(error.message);
+    else { setNewChecklistText(""); await load(); }
+  }
+  async function toggleChecklistItem(item) {
+    setChecklistErr(null);
+    const { error } = await sb.from("mission_checklist_items").update({ is_checked: !item.is_checked }).eq("id", item.id);
+    if (error) setChecklistErr(error.message);
+    else await load();
+  }
+  async function deleteChecklistItem(id) {
+    setChecklistErr(null);
+    const { error } = await sb.from("mission_checklist_items").delete().eq("id", id);
+    if (error) setChecklistErr(error.message);
     else await load();
   }
 
@@ -1445,6 +1531,47 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           </div>
         )}
 
+        {(checklist.length > 0 || isCreator) && (
+          <div className="border-t border-slate-200 pt-3 mt-3">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-sm font-semibold text-slate-600">檢查清單</h3>
+              {checklist.length > 0 && (
+                <span className="text-xs text-slate-400">
+                  {checklist.filter(i => i.is_checked).length} / {checklist.length}（{checklistProgress(checklist, mission.status)}%）
+                </span>
+              )}
+            </div>
+            {checklist.length > 0 && (
+              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-3">
+                <div className="h-2 bg-blue-600" style={{ width: `${checklistProgress(checklist, mission.status)}%` }} />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              {checklist.map(item => (
+                <div key={item.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                  <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
+                    onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
+                  <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>{item.content}</span>
+                  {isCreator && !isClosed && (
+                    <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                      <Icon.Trash className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {isCreator && !isClosed && (
+              <form onSubmit={addChecklistItem} className="flex gap-2 mt-2">
+                <input value={newChecklistText} onChange={e => setNewChecklistText(e.target.value)}
+                  maxLength={150} placeholder="新增檢查清單項目…"
+                  className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                <button type="submit" className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">新增</button>
+              </form>
+            )}
+            {checklistErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{checklistErr}</p>}
+          </div>
+        )}
+
         <div className="border-t border-slate-200 pt-3 mt-3">
           <h3 className="text-sm font-semibold text-slate-600 mb-2">更新紀錄</h3>
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -1557,9 +1684,10 @@ const COLUMN_LABELS = {
   updated_at: "最後更新", procrastination_days: "拖延天數", title: "任務標題", priority: "重要性",
   scale: "任務規模", urgency: "緊急度", due_date: "截止時間", status: "狀態", action: "動作",
   no_progress_days: "無進度天數", closed_at: "完成/棄置時間", final_comment: "最終評論",
+  checklist_progress: "檢查清單進度",
 };
 
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode }) {
   const isClosedMode = columnMode === "closed";
   const columnDefs = isClosedMode ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
   const vc = visibleColumns || (isClosedMode ? DEFAULT_VISIBLE_COLUMNS_CLOSED : DEFAULT_VISIBLE_COLUMNS);
@@ -1636,6 +1764,15 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
       case "urgency": return td(key, renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "due_date": return td(key, renderDueDate(m, dueDateDisplayList, dueDateColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "status": return td(key, <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</span>, null, null, rowStarStyle);
+      case "checklist_progress": {
+        const pct = checklistProgress(m.mission_checklist_items, m.status);
+        const content = pct === null ? "—" : checklistDisplayMode === "percent" ? `${pct}%` : (
+          <div className="w-20 bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="h-2 bg-blue-600" style={{ width: `${pct}%` }} />
+          </div>
+        );
+        return td(key, content, "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
+      }
       case "action": return td(key, (
         <div className="flex items-center gap-2">
           {isOpenStatus && !isHidden && (
@@ -2140,6 +2277,7 @@ function SettingsView({ profile, onProfileChange }) {
   const noProgressColorOverride = profile.no_progress_color_override || false;
   const noProgressSeverityDays = profile.no_progress_severity_days || 7;
   const rememberSortMode = profile.remember_sort_mode || "last_used";
+  const checklistDisplayMode = profile.checklist_display_mode || "bar";
   const [editingOtherDisplay, setEditingOtherDisplay] = useState(false);
   const [relationFilterDisplayTopDraft, setRelationFilterDisplayTopDraft] = useState(relationFilterDisplayTop);
   const [relationFilterDisplayListDraft, setRelationFilterDisplayListDraft] = useState(relationFilterDisplayList);
@@ -2150,6 +2288,7 @@ function SettingsView({ profile, onProfileChange }) {
   const [noProgressColorOverrideDraft, setNoProgressColorOverrideDraft] = useState(noProgressColorOverride);
   const [noProgressSeverityDaysDraft, setNoProgressSeverityDaysDraft] = useState(String(noProgressSeverityDays));
   const [rememberSortModeDraft, setRememberSortModeDraft] = useState(rememberSortMode);
+  const [checklistDisplayModeDraft, setChecklistDisplayModeDraft] = useState(checklistDisplayMode);
   const [savingOtherDisplay, setSavingOtherDisplay] = useState(false);
 
   function startEditOtherDisplay() {
@@ -2162,6 +2301,7 @@ function SettingsView({ profile, onProfileChange }) {
     setNoProgressColorOverrideDraft(noProgressColorOverride);
     setNoProgressSeverityDaysDraft(String(noProgressSeverityDays));
     setRememberSortModeDraft(rememberSortMode);
+    setChecklistDisplayModeDraft(checklistDisplayMode);
     setEditingOtherDisplay(true);
   }
   async function saveOtherDisplay() {
@@ -2177,6 +2317,7 @@ function SettingsView({ profile, onProfileChange }) {
       no_progress_color_override: noProgressColorOverrideDraft,
       no_progress_severity_days: parsedDays,
       remember_sort_mode: rememberSortModeDraft,
+      checklist_display_mode: checklistDisplayModeDraft,
     }).eq("id", profile.id);
     setSavingOtherDisplay(false);
     if (!error) {
@@ -2191,6 +2332,7 @@ function SettingsView({ profile, onProfileChange }) {
         no_progress_color_override: noProgressColorOverrideDraft,
         no_progress_severity_days: parsedDays,
         remember_sort_mode: rememberSortModeDraft,
+        checklist_display_mode: checklistDisplayModeDraft,
       });
       setEditingOtherDisplay(false);
     } else {
@@ -2718,6 +2860,18 @@ function SettingsView({ profile, onProfileChange }) {
               </select>
             ) : (
               <span className="font-medium">{rememberSortMode === "last_used" ? "上次停留選項(預設)" : SORT_MODE_LABELS[rememberSortMode]}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs mt-2">
+            <label className="text-slate-500">Checklist 進度顯示：</label>
+            {editingOtherDisplay ? (
+              <select value={checklistDisplayModeDraft} onChange={e => setChecklistDisplayModeDraft(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                <option value="bar">進度條</option>
+                <option value="percent">百分比數字</option>
+              </select>
+            ) : (
+              <span className="font-medium">{checklistDisplayMode === "percent" ? "百分比數字" : "進度條"}</span>
             )}
           </div>
           <p className="text-xs text-slate-400 mt-2">logo 顯示就是用綠色小人圖示呈現指派關係；字樣顯示則改成 checkbox + 文字說明四種狀態。上方核選區與任務列表內可以各自獨立設定。截止時間的三種顯示模式、以及剩餘天數的顏色覆蓋，任務內頁與任務列表也可以分開設定。</p>
@@ -3322,7 +3476,7 @@ function Dashboard({ session, profile, setProfile }) {
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
-    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email)").order("created_at", { ascending: false });
+    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), mission_checklist_items(id,is_checked)").order("created_at", { ascending: false });
     const { data } = await q;
     setMissions(data || []);
   }, []);
@@ -3430,6 +3584,7 @@ function Dashboard({ session, profile, setProfile }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, () => { loadMissions(); loadFriendProfiles(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_hides" }, () => loadHiddenIds())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_stars" }, () => loadStarredIds())
+      .on("postgres_changes", { event: "*", schema: "public", table: "mission_checklist_items" }, () => loadMissions())
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
       .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, () => { loadProjects(); loadCurrentProjectMembers(openProjectIdRef.current); loadMyProjectIds(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` }, () => loadNotifs())
@@ -3743,32 +3898,32 @@ function Dashboard({ session, profile, setProfile }) {
             {starredMissions.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{starredMissions.length}）</h3>
-                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} />
               </section>
             )}
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" />
+                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" />
+                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} />
+                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} checklistDisplayMode={profile.checklist_display_mode} />
               </section>
             )}
           </div>
@@ -3936,25 +4091,25 @@ function Dashboard({ session, profile, setProfile }) {
                 {projectStarredMissions.length > 0 && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{projectStarredMissions.length}）</h3>
-                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} />
                   </section>
                 )}
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} />
+                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" />
+                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" />
+                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} />
                   </section>
                 )}
               </>
