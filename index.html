@@ -1287,9 +1287,17 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [switchError, setSwitchError] = useState(null);
 
   const load = useCallback(async () => {
-    const { data: m } = await sb.from("missions")
-      .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), project:projects(id,name)")
-      .eq("id", missionId).single();
+    const [missionRes, updatesRes, checklistRes] = await Promise.all([
+      sb.from("missions")
+        .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), project:projects(id,name)")
+        .eq("id", missionId).single(),
+      sb.from("mission_updates")
+        .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
+        .eq("mission_id", missionId).order("created_at", { ascending: true }),
+      sb.from("mission_checklist_items")
+        .select("*").eq("mission_id", missionId).order("created_at", { ascending: true }),
+    ]);
+    const m = missionRes.data;
     setMission(m);
     if (m) {
       setEditTitle(m.title); setEditContent(m.content);
@@ -1306,13 +1314,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         setProjectMembers([]);
       }
     }
-    const { data: u } = await sb.from("mission_updates")
-      .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
-      .eq("mission_id", missionId).order("created_at", { ascending: true });
-    setUpdates(u || []);
-    const { data: c } = await sb.from("mission_checklist_items")
-      .select("*").eq("mission_id", missionId).order("created_at", { ascending: true });
-    setChecklist(c || []);
+    setUpdates(updatesRes.data || []);
+    setChecklist(checklistRes.data || []);
   }, [missionId]);
 
   useEffect(() => { load(); }, [load]);
@@ -1366,35 +1369,56 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 
   async function addChecklistItem(e) {
     e.preventDefault();
-    if (!newChecklistText.trim()) return;
+    const text = newChecklistText.trim();
+    if (!text) return;
     setChecklistErr(null);
-    const { error } = await sb.from("mission_checklist_items").insert({ mission_id: missionId, content: newChecklistText.trim() });
-    if (error) setChecklistErr(error.message);
-    else { setNewChecklistText(""); await load(); }
+    setNewChecklistText("");
+    const { error } = await sb.from("mission_checklist_items").insert({ mission_id: missionId, content: text });
+    if (error) { setChecklistErr(error.message); setNewChecklistText(text); }
+    load();
   }
   async function toggleChecklistItem(item) {
     setChecklistErr(null);
-    const { error } = await sb.from("mission_checklist_items").update({ is_checked: !item.is_checked }).eq("id", item.id);
-    if (error) setChecklistErr(error.message);
-    else await load();
+    const nextChecked = !item.is_checked;
+    setChecklist(list => list.map(i => i.id === item.id ? { ...i, is_checked: nextChecked } : i));
+    const { error } = await sb.from("mission_checklist_items").update({ is_checked: nextChecked }).eq("id", item.id);
+    if (error) {
+      setChecklistErr(error.message);
+      setChecklist(list => list.map(i => i.id === item.id ? { ...i, is_checked: item.is_checked } : i));
+    } else {
+      load();
+    }
   }
   async function deleteChecklistItem(id) {
     setChecklistErr(null);
+    const removed = checklist.find(i => i.id === id);
+    setChecklist(list => list.filter(i => i.id !== id));
     const { error } = await sb.from("mission_checklist_items").delete().eq("id", id);
-    if (error) setChecklistErr(error.message);
-    else await load();
+    if (error) {
+      setChecklistErr(error.message);
+      if (removed) setChecklist(list => [...list, removed].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+    } else {
+      load();
+    }
   }
   function startEditChecklist(item) {
     setEditingChecklistId(item.id);
     setEditingChecklistText(item.content);
   }
   async function saveChecklistEdit(id) {
-    if (!editingChecklistText.trim()) { setEditingChecklistId(null); return; }
-    setChecklistErr(null);
-    const { error } = await sb.from("mission_checklist_items").update({ content: editingChecklistText.trim() }).eq("id", id);
+    const text = editingChecklistText.trim();
     setEditingChecklistId(null);
-    if (error) setChecklistErr(error.message);
-    else await load();
+    if (!text) return;
+    setChecklistErr(null);
+    const previous = checklist.find(i => i.id === id);
+    setChecklist(list => list.map(i => i.id === id ? { ...i, content: text } : i));
+    const { error } = await sb.from("mission_checklist_items").update({ content: text }).eq("id", id);
+    if (error) {
+      setChecklistErr(error.message);
+      if (previous) setChecklist(list => list.map(i => i.id === id ? previous : i));
+    } else {
+      load();
+    }
   }
 
   function startSwitch() {
@@ -1621,10 +1645,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   {visibleUpdates.map(u => (
                     <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2">
                       <div className="flex justify-between text-xs text-slate-400 mb-1">
-                        <span>{u.author?.display_name}</span>
+                        <span>{u.is_system ? "System" : u.author?.display_name}</span>
                         <span>{fmt(u.created_at)}</span>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap">{u.content}</p>
+                      <p className="text-sm whitespace-pre-wrap">
+                        {u.is_system
+                          ? u.content.split("\n").map((line, i) => <React.Fragment key={i}>{i > 0 && <br/>}{u.author?.display_name}{line}</React.Fragment>)
+                          : u.content}
+                      </p>
                       {u.is_system ? (
                         <div className="flex justify-end mt-1">
                           <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
