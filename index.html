@@ -1259,7 +1259,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -1605,29 +1605,42 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         )}
 
         <div className="border-t border-slate-200 pt-3 mt-3">
-          <h3 className="text-sm font-semibold text-slate-600 mb-2">更新紀錄</h3>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-sm font-semibold text-slate-600">更新紀錄</h3>
+            <label className="flex items-center gap-1.5 text-xs text-slate-500">
+              <input type="checkbox" checked={showSystemLogs !== false} onChange={onToggleShowSystemLogs} className="w-4 h-4" />
+              顯示〈系統自動記錄〉
+            </label>
+          </div>
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {updates.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
-            {updates.map(u => (
-              <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                <div className="flex justify-between text-xs text-slate-400 mb-1">
-                  <span>{u.author?.display_name}</span>
-                  <span>{fmt(u.created_at)}</span>
-                </div>
-                <p className="text-sm whitespace-pre-wrap">{u.content}</p>
-                {u.is_system ? (
-                  <div className="flex justify-end mt-1">
-                    <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
-                  </div>
-                ) : u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
-                  <div className="flex justify-end mt-1">
-                    <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                      <Icon.Trash className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+            {(() => {
+              const visibleUpdates = showSystemLogs === false ? updates.filter(u => !u.is_system) : updates;
+              return (
+                <>
+                  {visibleUpdates.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
+                  {visibleUpdates.map(u => (
+                    <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2">
+                      <div className="flex justify-between text-xs text-slate-400 mb-1">
+                        <span>{u.author?.display_name}</span>
+                        <span>{fmt(u.created_at)}</span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap">{u.content}</p>
+                      {u.is_system ? (
+                        <div className="flex justify-end mt-1">
+                          <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
+                        </div>
+                      ) : u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
+                        <div className="flex justify-end mt-1">
+                          <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                            <Icon.Trash className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -3782,6 +3795,11 @@ function Dashboard({ session, profile, setProfile }) {
     setProfile(p => ({ ...p, [field]: order }));
     await sb.from("profiles").update({ [field]: order }).eq("id", profile.id);
   }
+  async function toggleShowSystemLogs() {
+    const next = !(profile.show_system_logs !== false);
+    setProfile(p => ({ ...p, show_system_logs: next }));
+    await sb.from("profiles").update({ show_system_logs: next }).eq("id", profile.id);
+  }
   async function toggleSection(key) {
     const updated = { ...visibleSections, [key]: !visibleSections[key] };
     setVisibleSections(updated);
@@ -4229,7 +4247,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
