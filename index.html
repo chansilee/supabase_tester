@@ -1264,6 +1264,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
   const [newChecklistText, setNewChecklistText] = useState("");
+  const [editingChecklistId, setEditingChecklistId] = useState(null);
+  const [editingChecklistText, setEditingChecklistText] = useState("");
   const [checklistErr, setChecklistErr] = useState(null);
   const [projectMembers, setProjectMembers] = useState([]);
   const [replyText, setReplyText] = useState("");
@@ -1379,6 +1381,18 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   async function deleteChecklistItem(id) {
     setChecklistErr(null);
     const { error } = await sb.from("mission_checklist_items").delete().eq("id", id);
+    if (error) setChecklistErr(error.message);
+    else await load();
+  }
+  function startEditChecklist(item) {
+    setEditingChecklistId(item.id);
+    setEditingChecklistText(item.content);
+  }
+  async function saveChecklistEdit(id) {
+    if (!editingChecklistText.trim()) { setEditingChecklistId(null); return; }
+    setChecklistErr(null);
+    const { error } = await sb.from("mission_checklist_items").update({ content: editingChecklistText.trim() }).eq("id", id);
+    setEditingChecklistId(null);
     if (error) setChecklistErr(error.message);
     else await load();
   }
@@ -1531,7 +1545,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           </div>
         )}
 
-        {(checklist.length > 0 || isCreator) && (
+        {(checklist.length > 0 || isCreator || isAssignee) && (
           <div className="border-t border-slate-200 pt-3 mt-3">
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-sm font-semibold text-slate-600">檢查清單</h3>
@@ -1547,20 +1561,38 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
             )}
             <div className="space-y-1.5">
-              {checklist.map(item => (
-                <div key={item.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
-                  <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
-                    onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
-                  <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>{item.content}</span>
-                  {isCreator && !isClosed && (
-                    <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                      <Icon.Trash className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
+              {checklist.map(item => {
+                const isAuthor = item.created_by === currentUser.id;
+                const canEditDelete = isAuthor && canToggleChecklist;
+                const isEditing = editingChecklistId === item.id;
+                return (
+                  <div key={item.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                    <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
+                      onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
+                    {isEditing ? (
+                      <input value={editingChecklistText} onChange={e => setEditingChecklistText(e.target.value)}
+                        maxLength={150} autoFocus
+                        onKeyDown={e => { if (e.key === "Enter") saveChecklistEdit(item.id); }}
+                        className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+                    ) : (
+                      <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>{item.content}</span>
+                    )}
+                    {canEditDelete && (
+                      <button onClick={() => isEditing ? saveChecklistEdit(item.id) : startEditChecklist(item)} title="編輯內容"
+                        className={"flex items-center justify-center w-6 h-6 rounded-lg " + (isEditing ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-600")}>
+                        <Icon.Edit className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canEditDelete && !isEditing && (
+                      <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                        <Icon.Trash className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            {isCreator && !isClosed && (
+            {(isCreator || isAssignee) && !isClosed && (
               <form onSubmit={addChecklistItem} className="flex gap-2 mt-2">
                 <input value={newChecklistText} onChange={e => setNewChecklistText(e.target.value)}
                   maxLength={150} placeholder="新增檢查清單項目…"
@@ -1583,7 +1615,11 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   <span>{fmt(u.created_at)}</span>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{u.content}</p>
-                {u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
+                {u.is_system ? (
+                  <div className="flex justify-end mt-1">
+                    <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
+                  </div>
+                ) : u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
                   <div className="flex justify-end mt-1">
                     <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
                       <Icon.Trash className="w-4 h-4" />
