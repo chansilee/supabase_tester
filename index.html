@@ -1269,6 +1269,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [checklist, setChecklist] = useState([]);
   const [newChecklistText, setNewChecklistText] = useState("");
   const [editingChecklistId, setEditingChecklistId] = useState(null);
+  const [reorderChecklistMode, setReorderChecklistMode] = useState(false);
   const [editingChecklistText, setEditingChecklistText] = useState("");
   const [checklistErr, setChecklistErr] = useState(null);
   const [projectMembers, setProjectMembers] = useState([]);
@@ -1300,7 +1301,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
         .eq("mission_id", missionId).order("created_at", { ascending: true }),
       sb.from("mission_checklist_items")
-        .select("*").eq("mission_id", missionId).order("created_at", { ascending: true }),
+        .select("*").eq("mission_id", missionId).order("position", { ascending: true }),
     ]);
     const m = missionRes.data;
     setMission(m);
@@ -1422,6 +1423,20 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setChecklistErr(error.message);
       if (previous) setChecklist(list => list.map(i => i.id === id ? previous : i));
     } else {
+      load();
+    }
+  }
+  async function moveChecklistItem(index, dir) {
+    const target = index + dir;
+    if (target < 0 || target >= checklist.length) return;
+    const a = checklist[index], b = checklist[target];
+    const reordered = [...checklist];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setChecklist(reordered);
+    const { error: e1 } = await sb.from("mission_checklist_items").update({ position: b.position }).eq("id", a.id);
+    const { error: e2 } = await sb.from("mission_checklist_items").update({ position: a.position }).eq("id", b.id);
+    if (e1 || e2) {
+      setChecklistErr((e1 || e2).message);
       load();
     }
   }
@@ -1586,7 +1601,15 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         {(checklist.length > 0 || isCreator || isAssignee) && (
           <div className="border-t border-slate-200 pt-3 mt-3">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-sm font-semibold text-slate-600">檢查清單</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-600">檢查清單</h3>
+                {canToggleChecklist && checklist.length > 1 && (
+                  <button onClick={() => setReorderChecklistMode(v => !v)} title="調整順序"
+                    className={"flex items-center justify-center rounded-lg w-6 h-6 " + (reorderChecklistMode ? "bg-blue-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600")}>
+                    <Icon.Sort className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
               {checklist.length > 0 && (
                 <span className="text-xs text-slate-400">
                   {checklist.filter(i => i.is_checked).length} / {checklist.length}（{checklistProgress(checklist, mission.status)}%）
@@ -1599,7 +1622,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
             )}
             <div className="space-y-1.5">
-              {checklist.map(item => {
+              {checklist.map((item, index) => {
                 const isAuthor = item.created_by === currentUser.id;
                 const canEditDelete = isAuthor && canToggleChecklist;
                 const isEditing = editingChecklistId === item.id;
@@ -1615,16 +1638,29 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     ) : (
                       <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>{item.content}</span>
                     )}
-                    {canEditDelete && (
-                      <button onClick={() => isEditing ? saveChecklistEdit(item.id) : startEditChecklist(item)} title="編輯內容"
-                        className={"flex items-center justify-center w-6 h-6 rounded-lg " + (isEditing ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-600")}>
-                        <Icon.Edit className="w-4 h-4" />
-                      </button>
-                    )}
-                    {canEditDelete && !isEditing && (
-                      <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                        <Icon.Trash className="w-4 h-4" />
-                      </button>
+                    {reorderChecklistMode ? (
+                      <div className="flex gap-1">
+                        <button onClick={() => moveChecklistItem(index, -1)} disabled={index === 0} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
+                          <Icon.ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => moveChecklistItem(index, 1)} disabled={index === checklist.length - 1} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
+                          <Icon.ChevronDown className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {canEditDelete && (
+                          <button onClick={() => isEditing ? saveChecklistEdit(item.id) : startEditChecklist(item)} title="編輯內容"
+                            className={"flex items-center justify-center w-6 h-6 rounded-lg " + (isEditing ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-600")}>
+                            <Icon.Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canEditDelete && !isEditing && (
+                          <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                            <Icon.Trash className="w-4 h-4" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 );
