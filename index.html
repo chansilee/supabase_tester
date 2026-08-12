@@ -1032,6 +1032,51 @@ function primaryCategoryOf(scores) {
   return best;
 }
 
+// 手動分類：多選＋自動平分（不提供比例調整，選 N 個分類各占 1/N）。
+// 選 0 個時回傳 null——「未分類」是有意義的狀態，不強制塞 other:1.0 污染資料，
+// 避免跟「AI 判斷過、真的就是 other」混在一起，之後做分類統計時才不會失真。
+function evenSplitScores(selectedKeys) {
+  if (!selectedKeys || selectedKeys.length === 0) return null;
+  const val = Number((1 / selectedKeys.length).toFixed(4));
+  const scores = {};
+  AI_CATEGORIES.forEach(k => { scores[k] = selectedKeys.includes(k) ? val : 0; });
+  return scores;
+}
+
+// 十分類權重長條圖：由高到低排序，最高分那條用強調色，其餘灰色
+function CategoryBreakdown({ scores }) {
+  if (!scores) return <p className="text-xs text-slate-300 px-1">尚未分類</p>;
+  const sorted = AI_CATEGORIES.map(k => [k, Number(scores[k]) || 0]).sort((a, b) => b[1] - a[1]);
+  const top = sorted.length ? sorted[0][1] : 0;
+  return (
+    <div className="space-y-1">
+      {sorted.map(([key, score]) => (
+        <div key={key} className="flex items-center gap-2">
+          <span className="w-16 text-xs text-slate-500 shrink-0">{AI_CATEGORY_LABELS[key]}</span>
+          <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+            <div className="h-2" style={{ width: `${Math.max(score * 100, score > 0 ? 2 : 0)}%`, background: (score === top && top > 0) ? "#2563eb" : "#cbd5e1" }} />
+          </div>
+          <span className="w-9 text-xs text-slate-400 text-right shrink-0">{score.toFixed(2)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 手動分類的多選按鈕群組，樣式比照既有的重要性/規模按鈕群組
+function CategoryMultiSelect({ selected, onToggle }) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {AI_CATEGORIES.map(key => (
+        <button key={key} type="button" onClick={() => onToggle(key)}
+          className={"px-2.5 py-1 rounded-lg text-xs font-medium " + (selected.includes(key) ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+          {AI_CATEGORY_LABELS[key]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // 任務規模 S1~S5：純前端計算，不呼叫 AI。使用 checklist 目前的結構化細節即時算出
 function classifyTaskSize(count, totalMinutes, travelLegs, totalWaitDays) {
   if (travelLegs >= 2 || totalWaitDays >= 2 || count >= 8 || totalMinutes > 480) return 5;
@@ -1295,7 +1340,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [aiErr, setAiErr] = useState(null);
   const [aiErrCode, setAiErrCode] = useState(null); // 非額度類的技術性錯誤代碼，附在行內提示裡方便回報
   const [aiQuotaModal, setAiQuotaModal] = useState(null); // { title, message }：額度/頻率類錯誤改用自繪彈窗
-  const [aiCategoryScores, setAiCategoryScores] = useState(null);
+  const [aiCategoryScores, setAiCategoryScores] = useState(null); // 目前的分類權重，不論來自 AI 或手動設定
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryEditing, setCategoryEditing] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -1371,6 +1419,18 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     }
   }
 
+  function startCategoryEdit() {
+    setCategoryDraft(AI_CATEGORIES.filter(k => Number((aiCategoryScores || {})[k]) > 0));
+    setCategoryEditing(true);
+  }
+  function toggleCategoryDraft(key) {
+    setCategoryDraft(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
+  }
+  function saveCategoryEdit() {
+    setAiCategoryScores(evenSplitScores(categoryDraft));
+    setCategoryEditing(false);
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true); setErr(null);
@@ -1440,6 +1500,35 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             {contentOpen && (
               <textarea rows={4} value={content} onChange={e => setContent(e.target.value)}
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs text-slate-500">任務類別：{aiCategoryScores ? AI_CATEGORY_LABELS[primaryCategoryOf(aiCategoryScores)] : "尚未分類"}</label>
+              <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
+                className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                <Icon.Search className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {categoryOpen && (
+              <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                {!categoryEditing ? (
+                  <>
+                    <CategoryBreakdown scores={aiCategoryScores} />
+                    <button type="button" onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-500 mb-1">選擇分類（可複選，選多個會自動平分權重，都不選就是「未分類」）</p>
+                    <CategoryMultiSelect selected={categoryDraft} onToggle={toggleCategoryDraft} />
+                    <div className="flex gap-2 mt-2">
+                      <button type="button" onClick={saveCategoryEdit} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">套用</button>
+                      <button type="button" onClick={() => setCategoryEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
@@ -1678,6 +1767,12 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [aiSuggestions, setAiSuggestions] = useState([]); // 重新辨識的建議子任務（右欄，待匯入）
   const [aiCategoryScores, setAiCategoryScores] = useState(null);
   const [confirmDeadlineOverwrite, setConfirmDeadlineOverwrite] = useState(null); // { date, time }
+  const [confirmCategoryOverwrite, setConfirmCategoryOverwrite] = useState(null); // 新的 category_scores，待確認是否覆蓋舊設定
+  const [categoryOpen, setCategoryOpen] = useState(false); // 「任務類別」區塊收合狀態
+  const [categoryEditing, setCategoryEditing] = useState(false); // 是否進入手動分類編輯
+  const [categoryDraft, setCategoryDraft] = useState([]); // 手動分類編輯中的多選草稿
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [categoryErr, setCategoryErr] = useState(null);
 
   const load = useCallback(async () => {
     const [missionRes, updatesRes, checklistRes] = await Promise.all([
@@ -1691,7 +1786,16 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         .select("*").eq("mission_id", missionId).order("position", { ascending: true }),
     ]);
     const m = missionRes.data;
-    setMission(m);
+    // 重要：只有真的拿到資料才更新 mission，絕對不能讓短暫的 race/查詢失敗把已經載入好的
+    // mission 蓋成 null——一旦變 null，整個 Modal 頂端的 `if (!mission) return null` 會讓
+    // 畫面整個消失，使用者體感上就是「跳出」。連續匯入多筆 AI 建議子任務時，
+    // 一次操作會同時觸發好幾個 realtime 重新載入（checklist insert + missions update 各觸發一次，
+    // 加上這裡自己主動呼叫的 load()），偶爾疊在一起造成其中一次查詢結果暫時空的，這裡擋下來即可。
+    if (m) {
+      setMission(m);
+    } else if (missionRes.error) {
+      console.error("load mission failed:", missionRes.error);
+    }
     if (m) {
       setEditTitle(m.title); setEditContent(m.content || "");
       setEditContentOpen(!!m.content);
@@ -1893,6 +1997,35 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     }
   }
 
+  // 手動分類：開啟編輯時，把目前 category_scores 裡分數 > 0 的分類全部預先勾選，
+  // 使用者可以直接調整（刪減/新增），不需要每次都從零開始選
+  function startCategoryEdit() {
+    const current = (aiCategoryScores !== null ? aiCategoryScores : mission.category_scores) || {};
+    setCategoryDraft(AI_CATEGORIES.filter(k => Number(current[k]) > 0));
+    setCategoryErr(null);
+    setCategoryEditing(true);
+  }
+  function toggleCategoryDraft(key) {
+    setCategoryDraft(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
+  }
+  async function saveCategoryEdit() {
+    setCategoryBusy(true); setCategoryErr(null);
+    try {
+      const scores = evenSplitScores(categoryDraft);
+      const { error } = await sb.from("missions").update({
+        category_scores: scores, primary_category: scores ? primaryCategoryOf(scores) : null,
+      }).eq("id", missionId);
+      if (error) throw error;
+      setMission(m => ({ ...m, category_scores: scores, primary_category: scores ? primaryCategoryOf(scores) : null }));
+      setAiCategoryScores(null); // 手動存檔後這筆就是最新的權威值，清掉待確認的 AI 草稿，避免顯示邏輯誤用舊草稿蓋掉剛存好的結果
+      setCategoryEditing(false);
+    } catch (e) {
+      setCategoryErr(e.message);
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
   // 重新 AI 辨識：只在編輯模式、依目前的 editTitle 重新呼叫。deadline 若原本已有值且判斷出不同結果，
   // 需要使用者在自繪 ConfirmModal 二次確認才覆蓋；scale 交給既有的自動判定 effect 處理，不需額外確認。
   async function rerunAiRecognize() {
@@ -1900,7 +2033,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     setAiBusy(true); setAiErr(null); setAiErrCode(null);
     try {
       const result = await callAiRecognize(editTitle.trim());
-      setAiCategoryScores(result.category_scores);
+      if (mission.category_scores) {
+        // 之前已經有分類設定（不論是 AI 判斷過還是使用者手動設的），重新辨識不能無聲蓋掉，要讓使用者決定
+        setConfirmCategoryOverwrite(result.category_scores);
+      } else {
+        // 從來沒分類過，直接套用新結果，不用多問
+        setAiCategoryScores(result.category_scores);
+      }
       setAiSuggestions((result.subtasks || []).map((s, i) => ({ ...s, _key: `ai-${Date.now()}-${i}` })));
       if (result.extracted_deadline_date) {
         const hasExisting = !!editDue;
@@ -1926,6 +2065,10 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     setEditDue(confirmDeadlineOverwrite.date);
     setEditDueTime(confirmDeadlineOverwrite.time);
     setConfirmDeadlineOverwrite(null);
+  }
+  function applyCategoryOverwrite() {
+    setAiCategoryScores(confirmCategoryOverwrite);
+    setConfirmCategoryOverwrite(null);
   }
   // 右欄「←」匯入：把 AI 建議的子任務直接寫入 checklist（from_ai=true），並從建議清單移除
   async function importAiSuggestion(sugg) {
@@ -2066,6 +2209,37 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
               <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); const u = rd === null ? null : urgencyScore(rd, mission.scale || 1); return renderUrgencyText(urgencyLabels, urgencyDisplay, "detail_view", u, urgencyColorOverride); })()}</div>
             </div>
+            <div className="text-xs text-slate-500 mb-3">
+              <div className="flex items-center gap-1.5">
+                <span>任務類別：{mission.primary_category ? AI_CATEGORY_LABELS[mission.primary_category] : "尚未分類"}</span>
+                <button onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
+                  className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                  <Icon.Search className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {categoryOpen && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                  {!categoryEditing ? (
+                    <>
+                      <CategoryBreakdown scores={mission.category_scores} />
+                      {(isCreator || isAssignee) && !isClosed && (
+                        <button onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-500 mb-1">選擇分類（可複選，選多個會自動平分權重，都不選就是「未分類」）</p>
+                      <CategoryMultiSelect selected={categoryDraft} onToggle={toggleCategoryDraft} />
+                      {categoryErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{categoryErr}</p>}
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={saveCategoryEdit} disabled={categoryBusy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">{categoryBusy ? "儲存中…" : "儲存"}</button>
+                        <button onClick={() => setCategoryEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="text-xs text-slate-400 mb-3">
               {mission.project_id
                 ? `誰可以看：專案「${mission.project?.name}」的所有成員（${projectMembers.map(p => p.display_name).join("、")}）`
@@ -2102,6 +2276,38 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
               {editContentOpen && (
                 <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-slate-500">任務類別：{(() => {
+                  const p = aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category;
+                  return p ? AI_CATEGORY_LABELS[p] : "尚未分類";
+                })()}</label>
+                <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
+                  className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                  <Icon.Search className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {categoryOpen && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                  {!categoryEditing ? (
+                    <>
+                      <CategoryBreakdown scores={aiCategoryScores !== null ? aiCategoryScores : mission.category_scores} />
+                      <button type="button" onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-500 mb-1">選擇分類（可複選，選多個會自動平分權重，都不選就是「未分類」）</p>
+                      <CategoryMultiSelect selected={categoryDraft} onToggle={toggleCategoryDraft} />
+                      {categoryErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{categoryErr}</p>}
+                      <div className="flex gap-2 mt-2">
+                        <button type="button" onClick={saveCategoryEdit} disabled={categoryBusy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">{categoryBusy ? "儲存中…" : "儲存"}</button>
+                        <button type="button" onClick={() => setCategoryEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
             <div>
@@ -2162,7 +2368,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <div className="flex gap-2">
               <button onClick={saveBodyEdit} disabled={busy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">儲存</button>
-              <button onClick={() => { setEditingBody(false); setAiSuggestions([]); setAiCategoryScores(null); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+              <button onClick={() => { setEditingBody(false); setAiSuggestions([]); setAiCategoryScores(null); setConfirmCategoryOverwrite(null); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
             </div>
           </div>
         )}
@@ -2173,6 +2379,15 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             confirmLabel="覆蓋" cancelLabel="保留原值"
             onConfirm={applyDeadlineOverwrite}
             onCancel={() => setConfirmDeadlineOverwrite(null)}
+          />
+        )}
+        {confirmCategoryOverwrite && (
+          <ConfirmModal
+            title="覆蓋任務分類？"
+            message="任務分類將被 AI 更新，確認或保留舊設定？"
+            confirmLabel="確認" cancelLabel="保留原設定"
+            onConfirm={applyCategoryOverwrite}
+            onCancel={() => setConfirmCategoryOverwrite(null)}
           />
         )}
         {aiBusy && <AiThinkingModal label="AI 思考中" />}
