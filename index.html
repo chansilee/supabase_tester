@@ -1321,7 +1321,7 @@ function newDraftItem(content, extra) {
   return { _key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, estimated_minutes: null, requires_travel: false, wait_days_after: 0, from_ai: false, ...extra };
 }
 
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [contentOpen, setContentOpen] = useState(false); // 任務內容預設收合，因為有 checklist 可以承載細節，不強迫填文字
@@ -1476,7 +1476,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div>
-            <label className="text-xs text-slate-500">任務標題</label>
+            <label className="text-xs text-slate-500">{fieldLabelPrefix}任務標題</label>
             <div className="flex gap-2 mt-1">
               <input required value={title} onChange={e => setTitle(e.target.value)}
                 className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
@@ -1489,7 +1489,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-500">任務內容（可留空）</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}任務內容</label>
               <button type="button" onClick={() => setContentOpen(v => !v)}
                 title={contentOpen ? "收合" : "展開填寫任務內容"}
                 className={"flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (contentOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>
@@ -1499,13 +1499,14 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             </div>
             {contentOpen && (
               <textarea rows={4} value={content} onChange={e => setContent(e.target.value)}
+                placeholder="（任務內容文字描述，可留空）"
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             )}
           </div>
 
           <div>
             <div className="flex items-center gap-1.5">
-              <label className="text-xs text-slate-500">任務類別：{aiCategoryScores ? AI_CATEGORY_LABELS[primaryCategoryOf(aiCategoryScores)] : "尚未分類"}</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{aiCategoryScores ? AI_CATEGORY_LABELS[primaryCategoryOf(aiCategoryScores)] : "尚未分類"}</label>
               <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                 className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
                 <Icon.Search className="w-3.5 h-3.5" />
@@ -1533,7 +1534,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
 
           <div className="border-t border-slate-200 pt-3">
-            <label className="text-xs text-slate-500">檢查清單（可留空，之後也能在任務內頁新增）</label>
+            <label className="text-xs text-slate-500">{fieldLabelPrefix}檢查清單</label>
             <div className="grid grid-cols-2 gap-3 mt-2">
               {/* 左欄：決定的子任務 */}
               <div>
@@ -1631,7 +1632,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
 
           <div>
-            <label className="text-xs text-slate-500">重要性</label>
+            <label className="text-xs text-slate-500">{fieldLabelPrefix}重要性</label>
             <div className="flex gap-2 mt-1">
               {PRIORITY_LEVELS.map(p => (
                 <button key={p} type="button" onClick={() => setPriority(p)}
@@ -1643,7 +1644,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-500">任務規模{scaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}任務規模{scaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
               <button type="button" onClick={toggleScaleLock}
                 disabled={scaleSource === "manual" && !scaleLocked && !hasStructuredDetail(checklistDraft)}
                 title={scaleSource === "auto" ? "細節未完全決定，先手動輸入規模" : "改回依 checklist 自動判定"}
@@ -1662,7 +1663,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-500">截止日期（可留空）</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}截止日期（可留空）</label>
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
                   className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
@@ -1672,7 +1673,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
               <p className="text-xs text-slate-400 mt-1">時刻留空＝只有日期，逾期以隔天 00:00 為界</p>
             </div>
             <div>
-              <label className="text-xs text-slate-500">指派給</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}指派給</label>
               <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)}
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
                 <option value={currentUserId}>我自己（{currentUserName}）</option>
@@ -1727,7 +1728,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2273,7 +2274,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             {aiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{aiErr}{aiErrCode ? `（代碼：${aiErrCode}）` : ""}</p>}
             <div>
               <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500">任務內容（可留空）</label>
+                <label className="text-xs text-slate-500">{fieldLabelPrefix}任務內容</label>
                 <button type="button" onClick={() => setEditContentOpen(v => !v)}
                   title={editContentOpen ? "收合" : "展開編輯任務內容"}
                   className={"flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (editContentOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>
@@ -2282,12 +2283,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 {!editContentOpen && editContent && <span className="text-xs text-slate-400">（已填寫，點「+」查看）</span>}
               </div>
               {editContentOpen && (
-                <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)}
+                  placeholder="（任務內容文字描述，可留空）"
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
               )}
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <label className="text-xs text-slate-500">任務類別：{(() => {
+                <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{(() => {
                   const p = aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category;
                   return p ? AI_CATEGORY_LABELS[p] : "尚未分類";
                 })()}</label>
@@ -2318,7 +2321,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               )}
             </div>
             <div>
-              <label className="text-xs text-slate-500">重要性</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}重要性</label>
               <div className="flex gap-2 mt-1">
                 {PRIORITY_LEVELS.map(p => (
                   <button key={p} type="button" onClick={() => setEditPriority(p)}
@@ -2330,7 +2333,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <div>
               <div className="flex items-center justify-between">
-                <label className="text-xs text-slate-500">任務規模{editScaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
+                <label className="text-xs text-slate-500">{fieldLabelPrefix}任務規模{editScaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
                 <button type="button" onClick={() => {
                     const next = editScaleSource === "auto" ? "manual" : "auto";
                     setEditScaleSource(next);
@@ -2353,7 +2356,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
             </div>
             <div>
-              <label className="text-xs text-slate-500">截止日期（可留空）</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}截止日期（可留空）</label>
               <div className="grid grid-cols-2 gap-2 mt-1">
                 <input type="date" value={editDue} onChange={e => setEditDue(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                 <input type="time" value={editDueTime} onChange={e => setEditDueTime(e.target.value)} disabled={!editDue}
@@ -2365,7 +2368,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <p className="text-xs text-violet-600 bg-violet-50 rounded-lg px-3 py-2">✨ AI 有 {aiSuggestions.length} 項子任務建議，在下方「檢查清單」區塊可以匯入或調整</p>
             )}
             <div>
-              <label className="text-xs text-slate-500">指派給{mission.project_id ? "（僅限此專案成員）" : "（自己或好友）"}</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}指派給{mission.project_id ? "（僅限此專案成員）" : "（自己或好友）"}</label>
               <select value={editAssigneeId} onChange={e => setEditAssigneeId(e.target.value)}
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
                 {assigneeChoices.map(u => (
@@ -3334,6 +3337,7 @@ function SettingsView({ profile, onProfileChange }) {
   const noProgressSeverityDays = profile.no_progress_severity_days || 7;
   const rememberSortMode = profile.remember_sort_mode || "last_used";
   const checklistDisplayMode = profile.checklist_display_mode || "bar";
+  const fieldLabelPrefix = profile.field_label_prefix ?? "※";
   const [editingOtherDisplay, setEditingOtherDisplay] = useState(false);
   const [relationFilterDisplayTopDraft, setRelationFilterDisplayTopDraft] = useState(relationFilterDisplayTop);
   const [relationFilterDisplayListDraft, setRelationFilterDisplayListDraft] = useState(relationFilterDisplayList);
@@ -3345,6 +3349,7 @@ function SettingsView({ profile, onProfileChange }) {
   const [noProgressSeverityDaysDraft, setNoProgressSeverityDaysDraft] = useState(String(noProgressSeverityDays));
   const [rememberSortModeDraft, setRememberSortModeDraft] = useState(rememberSortMode);
   const [checklistDisplayModeDraft, setChecklistDisplayModeDraft] = useState(checklistDisplayMode);
+  const [fieldLabelPrefixDraft, setFieldLabelPrefixDraft] = useState(fieldLabelPrefix);
   const [savingOtherDisplay, setSavingOtherDisplay] = useState(false);
 
   function startEditOtherDisplay() {
@@ -3358,6 +3363,7 @@ function SettingsView({ profile, onProfileChange }) {
     setNoProgressSeverityDaysDraft(String(noProgressSeverityDays));
     setRememberSortModeDraft(rememberSortMode);
     setChecklistDisplayModeDraft(checklistDisplayMode);
+    setFieldLabelPrefixDraft(fieldLabelPrefix);
     setEditingOtherDisplay(true);
   }
   async function saveOtherDisplay() {
@@ -3374,6 +3380,7 @@ function SettingsView({ profile, onProfileChange }) {
       no_progress_severity_days: parsedDays,
       remember_sort_mode: rememberSortModeDraft,
       checklist_display_mode: checklistDisplayModeDraft,
+      field_label_prefix: fieldLabelPrefixDraft,
     }).eq("id", profile.id);
     setSavingOtherDisplay(false);
     if (!error) {
@@ -3389,6 +3396,7 @@ function SettingsView({ profile, onProfileChange }) {
         no_progress_severity_days: parsedDays,
         remember_sort_mode: rememberSortModeDraft,
         checklist_display_mode: checklistDisplayModeDraft,
+        field_label_prefix: fieldLabelPrefixDraft,
       });
       setEditingOtherDisplay(false);
     } else {
@@ -3878,6 +3886,16 @@ function SettingsView({ profile, onProfileChange }) {
                 </select>
               ) : (
                 <span className="font-medium">{{ raw: "原始設定之截止時間", raw_plus_remaining: "原始設定之截止時間 + 剩餘天數提示", remaining_only: "剩餘天數提示" }[dueDateDisplayList]}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-slate-500">標題前綴：</label>
+              {editingOtherDisplay ? (
+                <input value={fieldLabelPrefixDraft} onChange={e => setFieldLabelPrefixDraft(e.target.value)}
+                  maxLength={4} placeholder="※"
+                  className="border border-slate-300 rounded-lg px-2 py-1 w-16 bg-white" />
+              ) : (
+                <span className="font-medium">{fieldLabelPrefix || "（無）"}</span>
               )}
             </div>
           </div>
@@ -5220,6 +5238,7 @@ function Dashboard({ session, profile, setProfile }) {
           priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display}
           priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override}
           currentUserId={profile.id} currentUserName={profile.display_name}
+          fieldLabelPrefix={profile.field_label_prefix ?? "※"}
           projectId={tab === "project" ? openProjectId : null}
           assigneeOptions={tab === "project" ? currentProjectMembers.filter(m => m.id !== profile.id) : friendProfiles}
         />
@@ -5259,7 +5278,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
