@@ -1452,7 +1452,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                 <div className="space-y-1.5 min-h-[2rem]">
                   {checklistDraft.map((it, i) => {
                     const detailOpen = detailOpenKey === it._key;
-                    const hasDetail = it.estimated_minutes || it.requires_travel || it.wait_days_after;
+                    const hasDetail = !!(it.estimated_minutes || it.requires_travel || it.wait_days_after);
                     return (
                       <React.Fragment key={it._key}>
                         <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">
@@ -1463,8 +1463,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                               {it.content}
                             </span>
                             {it.from_ai && <span className="text-[10px] text-violet-400 shrink-0">✨</span>}
-                            <button type="button" onClick={() => setDetailOpenKey(detailOpen ? null : it._key)}
-                              className={"shrink-0 flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (detailOpen || hasDetail ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>+</button>
+                            <button type="button" onClick={() => setDetailOpenKey(detailOpen ? null : it._key)} title="時間／移動／等待細節"
+                              className={"shrink-0 flex items-center justify-center w-5 h-5 rounded " + (detailOpen ? "bg-blue-100 text-blue-600" : hasDetail ? "text-blue-600 hover:text-blue-700" : "text-slate-400 hover:text-slate-600")}>
+                              <Icon.Search className="w-3.5 h-3.5" />
+                            </button>
                             <div className="flex gap-0.5 shrink-0">
                               <button type="button" onClick={() => moveDraftItem(i, -1)} disabled={i === 0} className="p-0.5 rounded disabled:opacity-20 hover:bg-slate-200">
                                 <Icon.ChevronUp className="w-3.5 h-3.5" />
@@ -1663,6 +1665,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [confirmDeleteUpdateId, setConfirmDeleteUpdateId] = useState(null);
+  const [confirmDeleteChecklistItem, setConfirmDeleteChecklistItem] = useState(null); // { id, content }：待確認刪除的檢查清單項目
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [confirmSwitch, setConfirmSwitch] = useState(null); // { type: "to_personal" } | { type: "to_project", project }
   const [switchBusy, setSwitchBusy] = useState(false);
@@ -1820,6 +1823,12 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     } else {
       load();
     }
+  }
+  // 垃圾桶按鈕先跳自繪彈窗二次確認，避免手滑誤觸直接刪掉子任務
+  function confirmDeleteChecklistItemAction() {
+    if (!confirmDeleteChecklistItem) return;
+    deleteChecklistItem(confirmDeleteChecklistItem.id);
+    setConfirmDeleteChecklistItem(null);
   }
   function startEditChecklist(item) {
     setEditingChecklistId(item.id);
@@ -2220,7 +2229,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     const isAuthor = item.created_by === currentUser.id;
                     const canEditDelete = isAuthor && canToggleChecklist;
                     const isEditing = editingChecklistId === item.id;
-                    const hasDetail = (item.estimated_minutes || item.requires_travel || item.wait_days_after);
+                    const hasDetail = !!(item.estimated_minutes || item.requires_travel || item.wait_days_after);
                     const detailOpen = detailChecklistId === item.id;
                     return (
                       <React.Fragment key={item.id}>
@@ -2243,8 +2252,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                         )}
                         {!reorderChecklistMode && canToggleChecklist && (
                           <button onClick={() => setDetailChecklistId(detailOpen ? null : item.id)} title="時間／移動／等待細節"
-                            className={"flex items-center justify-center w-6 h-6 rounded-lg text-xs font-bold " + (detailOpen || hasDetail ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
-                            +
+                            className={"flex items-center justify-center w-6 h-6 rounded-lg " + (detailOpen ? "bg-blue-100 text-blue-600" : hasDetail ? "text-blue-600 hover:text-blue-700" : "text-slate-400 hover:text-slate-600")}>
+                            <Icon.Search className="w-3.5 h-3.5" />
                           </button>
                         )}
                         {!reorderChecklistMode && canToggleChecklist && aiSuggestions.length > 0 && !isClosed && (
@@ -2268,8 +2277,9 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                                 <Icon.Edit className="w-4 h-4" />
                               </button>
                             )}
-                            {canEditDelete && !isEditing && (
-                              <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                            {canEditDelete && (
+                              <button onClick={() => setConfirmDeleteChecklistItem({ id: item.id, content: item.content })} title="刪除項目"
+                                className={"flex items-center justify-center " + (isEditing ? "text-slate-400 hover:text-slate-600" : "text-rose-500 hover:text-rose-600")}>
                                 <Icon.Trash className="w-4 h-4" />
                               </button>
                             )}
@@ -2396,6 +2406,17 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             danger
             onConfirm={deleteUpdate}
             onCancel={() => setConfirmDeleteUpdateId(null)}
+          />
+        )}
+
+        {confirmDeleteChecklistItem && (
+          <ConfirmModal
+            title="刪除子任務"
+            message={`確定要刪除「${confirmDeleteChecklistItem.content}」這個子任務嗎？此動作無法復原！`}
+            confirmLabel="確定刪除"
+            danger
+            onConfirm={confirmDeleteChecklistItemAction}
+            onCancel={() => setConfirmDeleteChecklistItem(null)}
           />
         )}
 
