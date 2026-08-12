@@ -1727,7 +1727,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2572,14 +2572,23 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         <div className="border-t border-slate-200 pt-3 mt-3">
           <div className="flex justify-between items-center mb-2">
             <h3 className="text-sm font-semibold text-slate-600">更新紀錄</h3>
-            <label className="flex items-center gap-1.5 text-xs text-slate-500">
-              <input type="checkbox" checked={showSystemLogs !== false} onChange={onToggleShowSystemLogs} className="w-4 h-4" />
-              顯示〈系統自動記錄〉
-            </label>
+            <div className="flex items-center gap-2">
+              <button onClick={onToggleUpdateLogSortOrder} title="切換更新紀錄排序方向"
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-600">
+                {(updateLogSortOrder || "desc") === "desc" ? <Icon.ChevronDown className="w-3.5 h-3.5" /> : <Icon.ChevronUp className="w-3.5 h-3.5" />}
+                {(updateLogSortOrder || "desc") === "desc" ? "新到舊" : "舊到新"}
+              </button>
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                <input type="checkbox" checked={showSystemLogs !== false} onChange={onToggleShowSystemLogs} className="w-4 h-4" />
+                顯示〈系統自動記錄〉
+              </label>
+            </div>
           </div>
           <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
             {(() => {
-              const visibleUpdates = showSystemLogs === false ? updates.filter(u => !u.is_system) : updates;
+              const filteredUpdates = showSystemLogs === false ? updates.filter(u => !u.is_system) : updates;
+              const sortDir = (updateLogSortOrder || "desc") === "desc" ? -1 : 1;
+              const visibleUpdates = [...filteredUpdates].sort((a, b) => sortDir * (new Date(a.created_at) - new Date(b.created_at)));
               return (
                 <>
                   {visibleUpdates.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
@@ -4791,6 +4800,11 @@ function Dashboard({ session, profile, setProfile }) {
     setProfile(p => ({ ...p, show_system_logs: next }));
     await sb.from("profiles").update({ show_system_logs: next }).eq("id", profile.id);
   }
+  async function toggleUpdateLogSortOrder() {
+    const next = (profile.update_log_sort_order || "desc") === "desc" ? "asc" : "desc";
+    setProfile(p => ({ ...p, update_log_sort_order: next }));
+    await sb.from("profiles").update({ update_log_sort_order: next }).eq("id", profile.id);
+  }
   async function toggleSection(key) {
     const updated = { ...visibleSections, [key]: !visibleSections[key] };
     setVisibleSections(updated);
@@ -5238,7 +5252,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
