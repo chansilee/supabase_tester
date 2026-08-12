@@ -285,6 +285,9 @@ table { border-collapse: collapse; width: 100%; }
 .border-2 { border-width: 2px; border-style: solid; }
 .border-slate-900 { border-color: #0f172a; }
 .opacity-40 { opacity: 0.4; }
+.hover\:opacity-90:hover { opacity: 0.9; }
+.transition { transition: all 0.15s ease; }
+.w-40 { width: 10rem; }
 .w-10 { width: 2.5rem; }
 .w-12 { width: 3rem; }
 .w-14 { width: 3.5rem; }
@@ -294,6 +297,7 @@ table { border-collapse: collapse; width: 100%; }
 .h-auto { height: auto; }
 .rounded { border-radius: 0.25rem; }
 .max-w-3xl { max-width: 48rem; }
+.max-w-4xl { max-width: 56rem; }
 .max-h-40 { max-height: 10rem; }
 .max-h-48 { max-height: 12rem; }
 .max-h-\[70vh\] { max-height: 70vh; }
@@ -359,6 +363,7 @@ table { border-collapse: collapse; width: 100%; }
 .justify-end { justify-content: flex-end; }
 .justify-center { justify-content: center; }
 .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 @media (min-width: 768px) { .md\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .relative { position: relative; }
 .absolute { position: absolute; }
@@ -437,6 +442,7 @@ const TASK_LIST_COLUMNS = [
   { key: "updated_at", label: "最後更新" },
   { key: "procrastination_days", label: "拖延天數" },
   { key: "title", label: "任務標題" },
+  { key: "category_score", label: "類別分數" },
   { key: "priority", label: "重要性" },
   { key: "scale", label: "任務規模" },
   { key: "urgency", label: "緊急度" },
@@ -445,6 +451,7 @@ const TASK_LIST_COLUMNS = [
   { key: "checklist_progress", label: "檢查清單進度" },
   { key: "action", label: "動作" },
   { key: "no_progress_days", label: "無進度天數" },
+  { key: "source", label: "來源" },
 ];
 const DEFAULT_VISIBLE_COLUMNS = TASK_LIST_COLUMNS.reduce((acc, c) => { acc[c.key] = true; return acc; }, {});
 
@@ -458,17 +465,19 @@ const TASK_LIST_COLUMNS_CLOSED = [
   { key: "relation", label: "指派關係" },
   { key: "updated_at", label: "最後更新" },
   { key: "title", label: "任務標題" },
+  { key: "category_score", label: "類別分數" },
   { key: "final_comment", label: "最終評論" },
   { key: "priority", label: "重要性" },
   { key: "scale", label: "任務規模" },
   { key: "status", label: "狀態" },
   { key: "checklist_progress", label: "檢查清單進度" },
   { key: "action", label: "動作" },
+  { key: "source", label: "來源" },
 ];
 const DEFAULT_VISIBLE_COLUMNS_CLOSED = {
   closed_at: true, created_at: false, creator: false, assignee: false, relation: false,
-  updated_at: false, title: true, final_comment: true, priority: false, scale: false,
-  status: true, checklist_progress: false, action: true,
+  updated_at: false, title: true, category_score: true, final_comment: true, priority: false, scale: false,
+  status: true, checklist_progress: false, action: true, source: true,
 };
 
 const TASK_SECTIONS = [
@@ -519,30 +528,43 @@ function AiThinkingModal({ label }) {
   );
 }
 
-function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleColumnsClosed, onToggleColumnClosed, visibleSections, onToggleSection, columnOrder, columnOrderClosed, onSaveColumnOrder, onClose }) {
+function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleColumnsClosed, onToggleColumnClosed, visibleSections, onToggleSection, columnOrder, columnOrderClosed, onSaveColumnOrder, onClose, showCategoryColumns }) {
   const [category, setCategory] = useState("open"); // open | closed
   const [reorderMode, setReorderMode] = useState(false);
   const [orderDraft, setOrderDraft] = useState([]);
   const [savingOrder, setSavingOrder] = useState(false);
   const isClosedCat = category === "closed";
-  const columnDefs = isClosedCat ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
+  // fullColumnDefs 保留完整欄位集合（含「類別分數」「來源」），用來驗證/計算實際存的排序陣列長度是否有效——
+  // 這兩欄不論從哪個頁面打開這個彈窗都真實存在於同一份持久化資料裡，所以長度判斷不能用篩選過的子集，
+  // 不然從個人/專案頁打開時，因為長度對不上，會誤判使用者自訂的順序無效、每次都被打回預設順序
+  const fullColumnDefs = isClosedCat ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
+  // 只有畫面上「要不要列出這個欄位讓使用者勾/排」用這個篩選過的清單，「類別分數」「來源」只有類別瀏覽頁看得到
+  const visibleColumnDefs = fullColumnDefs.filter(c => showCategoryColumns || (c.key !== "category_score" && c.key !== "source"));
   const vc = isClosedCat ? visibleColumnsClosed : visibleColumns;
   const onToggle = isClosedCat ? onToggleColumnClosed : onToggleColumn;
   const currentOrder = isClosedCat ? columnOrderClosed : columnOrder;
-  const defaultKeys = columnDefs.map(c => c.key);
-  const effectiveOrder = (Array.isArray(currentOrder) && currentOrder.length === defaultKeys.length && defaultKeys.every(k => currentOrder.includes(k)))
+  const fullDefaultKeys = fullColumnDefs.map(c => c.key);
+  const effectiveOrder = (Array.isArray(currentOrder) && currentOrder.length === fullDefaultKeys.length && fullDefaultKeys.every(k => currentOrder.includes(k)))
     ? currentOrder
-    : defaultKeys;
+    : fullDefaultKeys;
+  // 畫面渲染用：從完整順序裡濾掉這個情境不該看到的欄位（類別分數/來源），只顯示允許的那些
+  const visibleKeySet = new Set(visibleColumnDefs.map(c => c.key));
+  const renderableOrder = effectiveOrder.filter(k => visibleKeySet.has(k));
 
   function startReorder() {
     setOrderDraft(effectiveOrder);
     setReorderMode(true);
   }
+  // index/dir 是「畫面上看得到的那幾列」的位置；實際搬動時要換算回完整陣列裡的位置，
+  // 這樣「類別分數」「來源」（這個情境看不到、不能排）會維持原本位置不動，只有看得到的欄位互相交換順序
   function moveItem(index, dir) {
-    const target = index + dir;
-    if (target < 0 || target >= orderDraft.length) return;
+    const renderKeys = orderDraft.filter(k => visibleKeySet.has(k));
+    const targetIndex = index + dir;
+    if (targetIndex < 0 || targetIndex >= renderKeys.length) return;
+    const keyA = renderKeys[index], keyB = renderKeys[targetIndex];
+    const idxA = orderDraft.indexOf(keyA), idxB = orderDraft.indexOf(keyB);
     const next = [...orderDraft];
-    [next[index], next[target]] = [next[target], next[index]];
+    [next[idxA], next[idxB]] = [next[idxB], next[idxA]];
     setOrderDraft(next);
   }
   async function saveOrder() {
@@ -579,8 +601,8 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleColumnsClo
 
             {!reorderMode ? (
               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                {effectiveOrder.map(key => {
-                  const c = columnDefs.find(cc => cc.key === key);
+                {renderableOrder.map(key => {
+                  const c = visibleColumnDefs.find(cc => cc.key === key);
                   return (
                     <label key={key} className="flex items-center gap-2 text-sm bg-white rounded-lg px-3 py-2">
                       <input type="checkbox" checked={!!vc[key]} onChange={() => onToggle(key)} className="w-4 h-4" />
@@ -591,8 +613,9 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleColumnsClo
               </div>
             ) : (
               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                {orderDraft.map((key, i) => {
-                  const c = columnDefs.find(cc => cc.key === key);
+                {orderDraft.filter(k => visibleKeySet.has(k)).map((key, i) => {
+                  const c = visibleColumnDefs.find(cc => cc.key === key);
+                  const renderCount = orderDraft.filter(k => visibleKeySet.has(k)).length;
                   return (
                     <div key={key} className={"flex items-center justify-between gap-2 text-sm rounded-lg px-3 py-2 " + (vc[key] ? "bg-white" : "bg-slate-100 text-slate-400")}>
                       <span>{c.label}{!vc[key] && <span className="text-xs ml-1">（已隱藏）</span>}</span>
@@ -600,7 +623,7 @@ function ColumnSettingsModal({ visibleColumns, onToggleColumn, visibleColumnsClo
                         <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
                           <Icon.ChevronUp className="w-4 h-4" />
                         </button>
-                        <button onClick={() => moveItem(i, 1)} disabled={i === orderDraft.length - 1} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
+                        <button onClick={() => moveItem(i, 1)} disabled={i === renderCount - 1} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
                           <Icon.ChevronDown className="w-4 h-4" />
                         </button>
                       </div>
@@ -831,6 +854,7 @@ const SORT_MODE_HIGHLIGHT_COLUMNS = {
   procrastination_desc: ["no_progress_days", "status"],
   closed_desc: ["closed_at"],
   updated_desc: ["updated_at"],
+  category_first: ["category_score"],
 };
 
 // 特殊色欄位遮罩：跟原本藍色維持同樣的飽和度/明度，只換色相，供使用者自行挑選
@@ -1022,6 +1046,40 @@ const AI_CATEGORY_LABELS = {
   work: "工作", finance: "財務", chores: "雜務", health: "健康", family: "家庭事務",
   social: "人際社交", learning: "學習", travel: "外出/旅行", admin: "行政/文書", other: "其他",
 };
+// 類別瀏覽頁的卡片圖示：純 emoji + 主色底，避免額外圖片素材
+const CATEGORY_EMOJI = {
+  work: "💼", finance: "💰", chores: "🧹", health: "🏥", family: "🏠",
+  social: "🎉", learning: "📚", travel: "✈️", admin: "📋", other: "🗂️",
+};
+const CATEGORY_CARD_COLOR = {
+  work: "#3b82f6", finance: "#10b981", chores: "#f59e0b", health: "#ef4444", family: "#f97316",
+  social: "#ec4899", learning: "#8b5cf6", travel: "#06b6d4", admin: "#64748b", other: "#94a3b8",
+};
+
+// 狀態分層：未結案(0) < 已完成(1) < 已棄置(2)，類別瀏覽頁列表照這個順序分段顯示
+function statusTier(status) {
+  if (status === "completed") return 1;
+  if (status === "abandoned") return 2;
+  return 0;
+}
+// 類別瀏覽頁專用排序：分層優先（未結案→已完成→已棄置），
+// 同層內先比這個分類自己的分數（不是 primary_category，是任務在「這個分類」上的實際分數），
+// 分數相同才比整體優先級分數（沿用既有的 overallPriorityScore）
+function sortMissionsByCategory(list, categoryKey, weights) {
+  return [...list].sort((a, b) => {
+    const tierDiff = statusTier(a.status) - statusTier(b.status);
+    if (tierDiff !== 0) return tierDiff;
+    const scoreA = Number(a.category_scores?.[categoryKey]) || 0;
+    const scoreB = Number(b.category_scores?.[categoryKey]) || 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return overallPriorityScore(b, weights) - overallPriorityScore(a, weights);
+  });
+}
+// 「跟我有關」的任務：不論個人任務或專案任務，只要我是建立者或被指派者就算，
+// 「別人指派給別人」的專案任務一律不列入類別瀏覽
+function isRelevantToUser(m, userId) {
+  return m.creator_id === userId || m.assigned_id === userId;
+}
 function primaryCategoryOf(scores) {
   if (!scores) return null;
   let best = null, bestScore = -1;
@@ -1469,7 +1527,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -1728,7 +1786,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, isStarred, onStar, onUnstar, onDelete, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -1756,6 +1814,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [err, setErr] = useState(null);
   const [confirmDeleteUpdateId, setConfirmDeleteUpdateId] = useState(null);
   const [confirmDeleteChecklistItem, setConfirmDeleteChecklistItem] = useState(null); // { id, content }：待確認刪除的檢查清單項目
+  const [confirmDeleteMission, setConfirmDeleteMission] = useState(false); // 是否顯示「永久刪除任務」二次確認
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [confirmSwitch, setConfirmSwitch] = useState(null); // { type: "to_personal" } | { type: "to_project", project }
   const [switchBusy, setSwitchBusy] = useState(false);
@@ -2182,7 +2241,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-start mb-4">
           <div>
             <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
@@ -2230,7 +2289,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   {!categoryEditing ? (
                     <>
                       <CategoryBreakdown scores={mission.category_scores} />
-                      {(isCreator || isAssignee) && !isClosed && (
+                      {isCreator && (
                         <button onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
                       )}
                     </>
@@ -2253,11 +2312,29 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 ? `誰可以看：專案「${mission.project?.name}」的所有成員（${projectMembers.map(p => p.display_name).join("、")}）`
                 : `誰可以看：${[mission.creator?.display_name, mission.assignee?.display_name].filter((v, i, a) => v && a.indexOf(v) === i).join("、")}`}
             </div>
-            {isCreator && mission.status !== "completed" && mission.status !== "abandoned" && (
-              <div className="flex justify-end mb-2">
-                <button onClick={() => setEditingBody(true)} title="編輯本文" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
-                  <Icon.Edit className="w-4 h-4" />
-                </button>
+            {(!isClosed || isCreator) && (
+              <div className="flex items-center justify-end gap-3 mb-2">
+                {!isClosed && (
+                  isStarred ? (
+                    <button onClick={() => onUnstar(missionId)} title="取消關注" className="flex items-center justify-center text-pin-inactive">
+                      <Icon.Unboost className="w-6 h-6" />
+                    </button>
+                  ) : (
+                    <button onClick={() => onStar(missionId)} title="注目任務" className="flex items-center justify-center text-pin-active">
+                      <Icon.Boost className="w-6 h-6" />
+                    </button>
+                  )
+                )}
+                {isCreator && !isClosed && (
+                  <button onClick={() => setEditingBody(true)} title="編輯本文" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
+                    <Icon.Edit className="w-6 h-6" />
+                  </button>
+                )}
+                {isCreator && (
+                  <button onClick={() => setConfirmDeleteMission(true)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                    <Icon.Trash className="w-6 h-6" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2653,6 +2730,16 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             onCancel={() => setConfirmDeleteChecklistItem(null)}
           />
         )}
+        {confirmDeleteMission && (
+          <ConfirmModal
+            title="永久刪除任務"
+            message={`確定要永久刪除「${mission.title}」這個任務嗎？此動作無法復原！`}
+            confirmLabel="確定刪除"
+            danger
+            onConfirm={() => { onDelete(missionId); setConfirmDeleteMission(false); onClose(); }}
+            onCancel={() => setConfirmDeleteMission(false)}
+          />
+        )}
 
         {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-3">{err}</div>}
 
@@ -2743,10 +2830,10 @@ const COLUMN_LABELS = {
   updated_at: "最後更新", procrastination_days: "拖延天數", title: "任務標題", priority: "重要性",
   scale: "任務規模", urgency: "緊急度", due_date: "截止時間", status: "狀態", action: "動作",
   no_progress_days: "無進度天數", closed_at: "完成/棄置時間", final_comment: "最終評論",
-  checklist_progress: "檢查清單進度",
+  checklist_progress: "檢查清單進度", category_score: "類別分數", source: "來源",
 };
 
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode, showCategoryColumns, categoryKey, projectNameById }) {
   const isClosedMode = columnMode === "closed";
   const columnDefs = isClosedMode ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
   const vc = visibleColumns || (isClosedMode ? DEFAULT_VISIBLE_COLUMNS_CLOSED : DEFAULT_VISIBLE_COLUMNS);
@@ -2771,7 +2858,11 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
   const orderedKeys = forceShowSortColumn && highlightCols.length
     ? [...highlightCols.filter(k => baseKeys.includes(k)), ...baseKeys.filter(k => !highlightSet.has(k))]
     : baseKeys;
-  const visibleKeys = orderedKeys.filter(k => vc[k] || (forceShowSortColumn && highlightSet.has(k)));
+  // 「類別分數」「來源」這兩欄只有類別瀏覽頁會傳 showCategoryColumns=true 才會出現；
+  // 個人任務／專案任務即使使用者在設定裡勾選、調整過順序，這裡還是強制濾掉，避免跟一般任務列表混在一起
+  const visibleKeys = orderedKeys
+    .filter(k => showCategoryColumns || (k !== "category_score" && k !== "source"))
+    .filter(k => vc[k] || (forceShowSortColumn && highlightSet.has(k)));
   const colCount = visibleKeys.length || 1;
 
   function handleConfirmDelete() {
@@ -2818,6 +2909,12 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
         "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle
       );
       case "title": return td(key, m.title, "px-4 py-3 font-medium", null, rowStarStyle);
+      case "category_score": return td(key,
+        m.category_scores ? (Number(m.category_scores[categoryKey]) || 0).toFixed(2) : "—",
+        "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
+      case "source": return td(key,
+        m.project_id ? (projectNameById?.[m.project_id] || "專案任務") : "個人任務",
+        "px-4 py-3 whitespace-nowrap text-slate-400", null, rowStarStyle);
       case "priority": return td(key, renderPriorityText(priorityLabels, priorityDisplay, "list", m.priority, priorityColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "scale": return td(key, renderScaleText(scaleLabels, scaleDisplay, "list", m.scale || 1, scaleColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "urgency": return td(key, renderUrgencyText(urgencyLabels, urgencyDisplay, "list", urgency, urgencyColorOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
@@ -4325,6 +4422,117 @@ function ViewModeToggle({ mode, onChange }) {
 }
 
 // =====================================================================
+// 類別瀏覽：十個分類的方格卡片首頁 + 點進去的分類詳情列表
+// =====================================================================
+function CategoryGridPage({ missions, currentUserId, onOpenCategory }) {
+  // 每個分類先算個粗略數量給卡片參考（用預設 0.5 門檻，跟詳情頁預設值一致，純粹給使用者一個大概印象）
+  const relevant = missions.filter(m => m.category_scores && isRelevantToUser(m, currentUserId));
+  const counts = {};
+  AI_CATEGORIES.forEach(k => {
+    counts[k] = relevant.filter(m => (Number(m.category_scores[k]) || 0) >= 0.5).length;
+  });
+  return (
+    <div className="grid grid-cols-5 gap-4">
+      {AI_CATEGORIES.map(key => (
+        <button key={key} onClick={() => onOpenCategory(key)}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl py-8 hover:opacity-90 transition"
+          style={{ background: `${CATEGORY_CARD_COLOR[key]}1a`, border: `1px solid ${CATEGORY_CARD_COLOR[key]}40` }}>
+          <span style={{ fontSize: "5rem", lineHeight: 1 }}>{CATEGORY_EMOJI[key]}</span>
+          <span className="text-sm font-semibold" style={{ color: CATEGORY_CARD_COLOR[key] }}>{AI_CATEGORY_LABELS[key]}</span>
+          <span className="text-xs text-slate-400">{counts[key]} 項</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const CATEGORY_SORT_MODES = { category_first: "類別分數優先", ...SORT_MODE_LABELS };
+
+function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, visibleColumns, visibleColumnsClosed, visibleSections, onOpen, onBack,
+  projectNameById, hiddenSet, onHide, onUnhide, onDelete, starredSet, onStar, onUnstar, onOpenColumnSettings }) {
+  const [threshold, setThreshold] = useState(0.5);
+  const [sortMode, setSortMode] = useState("category_first");
+  const weights = profile.priority_weights;
+
+  const relevant = missions.filter(m => m.category_scores && isRelevantToUser(m, currentUserId)
+    && (Number(m.category_scores[categoryKey]) || 0) >= threshold);
+  // 不管選哪一種排序模式，都要照「顯示區塊設定」分成未結案/已完成/已棄置三段——這點要跟個人任務/專案任務
+  // 頁面的行為一致：排序模式只決定「段落內」的順序，不是決定要不要分段。之前只有「類別分數優先」有分段，
+  // 其餘 8 種既有模式會把三種狀態混在一起顯示，是漏掉了這個一致性。
+  const sortWithinTier = list => sortMode === "category_first"
+    ? sortMissionsByCategory(list, categoryKey, weights)
+    : sortMissions(list, sortMode, weights);
+
+  const groups = [
+    { key: "open", label: "未結案", columnMode: "list", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 0)) },
+    { key: "completed", label: "已完成", columnMode: "closed", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 1)) },
+    { key: "abandoned", label: "已棄置", columnMode: "closed", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 2)) },
+  ].filter(g => g.items.length > 0 && visibleSections?.[g.key] !== false);
+
+  const commonListProps = {
+    onOpen, currentUserId,
+    priorityLabels: profile.priority_labels, scaleLabels: profile.scale_labels,
+    priorityDisplay: profile.priority_display, scaleDisplay: profile.scale_display,
+    priorityColorOverride: profile.priority_color_override, scaleColorOverride: profile.scale_color_override,
+    urgencyDisplay: profile.urgency_display, urgencyLabels: profile.urgency_labels, urgencyColorOverride: profile.urgency_color_override,
+    relationDisplayMode: profile.relation_filter_display_list,
+    dueDateDisplayList: profile.due_date_display_list, dueDateColorOverride: profile.due_date_color_override,
+    hiddenIds: hiddenSet, onHide, onUnhide, onDelete,
+    starredIds: starredSet, onStar, onUnstar, starOverrideColor: profile.star_override_color,
+    noProgressColorOverride: profile.no_progress_color_override, noProgressSeverityDays: profile.no_progress_severity_days,
+    checklistDisplayMode: profile.checklist_display_mode,
+    sortMode, sortHighlightColor: profile.sort_highlight_color, forceShowSortColumn: profile.force_show_sort_column,
+    showCategoryColumns: true, categoryKey, projectNameById,
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <button onClick={onBack} className="text-sm text-slate-500 underline">← 返回類別瀏覽</button>
+        <button onClick={onOpenColumnSettings} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+          <Icon.Settings className="w-4 h-4 text-slate-600" />
+        </button>
+      </div>
+      <div className="flex items-center gap-3 mb-4">
+        <span style={{ fontSize: "2rem" }}>{CATEGORY_EMOJI[categoryKey]}</span>
+        <h2 className="text-xl font-bold" style={{ color: CATEGORY_CARD_COLOR[categoryKey] }}>{AI_CATEGORY_LABELS[categoryKey]}</h2>
+        <span className="text-xs text-slate-400">共 {relevant.length} 項</span>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4 bg-slate-50 rounded-lg px-4 py-3">
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          排序設定：
+          <select value={sortMode} onChange={e => setSortMode(e.target.value)}
+            className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+            {Object.entries(CATEGORY_SORT_MODES).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          分數門檻：{threshold.toFixed(2)}
+          <input type="range" min="0" max="1" step="0.05" value={threshold}
+            onChange={e => setThreshold(Number(e.target.value))} className="w-40" />
+        </label>
+      </div>
+
+      {relevant.length === 0 && <p className="text-sm text-slate-400 px-1">目前沒有分數達到門檻的任務，可以試著把門檻拉低一點</p>}
+
+      {groups.map(g => (
+        <div key={g.key} className="mb-4">
+          {g.label && <h3 className="text-xs font-semibold text-slate-400 mb-1.5 px-1">{g.label}（{g.items.length}）</h3>}
+          <MissionListView
+            {...commonListProps}
+            missions={g.items}
+            columnMode={g.columnMode}
+            visibleColumns={g.columnMode === "closed" ? visibleColumnsClosed : visibleColumns}
+            columnOrder={g.columnMode === "closed" ? profile.column_order_closed : profile.column_order}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =====================================================================
 // 會員等級與限制說明彈窗
 // =====================================================================
 const MEMBER_ROLE_LIMITS = {
@@ -4501,7 +4709,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [missions, setMissions] = useState([]);
   const [openMissionId, setOpenMissionId] = useState(null);
   const [showNew, setShowNew] = useState(false);
-  const [showColumnSettings, setShowColumnSettings] = useState(false);
+  const [columnSettingsContext, setColumnSettingsContext] = useState(null); // null | "list" | "category"（決定「類別分數」「來源」要不要出現在設定裡）
   const [visibleColumns, setVisibleColumns] = useState({ ...DEFAULT_VISIBLE_COLUMNS, ...(profile.visible_columns || {}) });
   const [visibleColumnsClosed, setVisibleColumnsClosed] = useState({ ...DEFAULT_VISIBLE_COLUMNS_CLOSED, ...(profile.visible_columns_closed || {}) });
   const [visibleSections, setVisibleSections] = useState({ ...DEFAULT_VISIBLE_SECTIONS, ...(profile.visible_sections || {}) });
@@ -4530,6 +4738,7 @@ function Dashboard({ session, profile, setProfile }) {
   const searchColorEntry = profile.search_highlight_color && profile.search_highlight_color !== "none" ? SORT_HIGHLIGHT_COLORS[profile.search_highlight_color] : null;
   const searchBoxStyle = (appliedSearch && searchColorEntry) ? { background: `rgba(${hexToRgbString(searchColorEntry.hex)},0.15)` } : undefined;
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
+  const [openCategoryKey, setOpenCategoryKey] = useState(null); // null=十宮格首頁；有值=該分類的詳情列表
   const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
   const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
   const [hiddenIds, setHiddenIds] = useState([]);
@@ -4700,6 +4909,7 @@ function Dashboard({ session, profile, setProfile }) {
     m.creator_id === profile.id || m.assigned_id === profile.id || (m.project_id && myProjectIdSet.has(m.project_id))
   );
   const visibleProjects = projects.filter(p => p.creator_id === profile.id || myProjectIdSet.has(p.id));
+  const projectNameById = Object.fromEntries(projects.map(p => [p.id, p.name]));
 
   // 專案列表自訂排序：有存過順序就照存的來，新增/離開的專案自動補在後面，不會整批失效
   const orderedProjects = (() => {
@@ -4846,7 +5056,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","個人任務"],["project","專案任務"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","個人任務"],["project","專案任務"],["category","類別瀏覽"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -4889,7 +5099,7 @@ function Dashboard({ session, profile, setProfile }) {
             <ViewModeToggle mode={personalViewMode} onChange={setPersonalViewMode} />
             <div className="flex items-center gap-2">
               {personalViewMode === "list" && (
-                <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                <button onClick={() => setColumnSettingsContext("list")} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
                   <Icon.Settings className="w-4 h-4 text-slate-600" />
                 </button>
               )}
@@ -4911,7 +5121,7 @@ function Dashboard({ session, profile, setProfile }) {
             {openProjectId ? (
               <div className="flex items-center gap-2">
                 {projectViewMode === "list" && (
-                  <button onClick={() => setShowColumnSettings(true)} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
+                  <button onClick={() => setColumnSettingsContext("list")} title="顯示欄位設定" className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-lg w-9 h-9">
                     <Icon.Settings className="w-4 h-4 text-slate-600" />
                   </button>
                 )}
@@ -5036,6 +5246,7 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
         {tab === "list" && personalViewMode === "gantt" && <GanttView missions={ganttMissions} onOpen={setOpenMissionId} />}
+
 
         {tab === "project" && !openProjectId && (
           <div className="bg-white rounded-2xl shadow overflow-x-auto">
@@ -5227,6 +5438,24 @@ function Dashboard({ session, profile, setProfile }) {
           </div>
         )}
 
+        {tab === "category" && (
+          <div className="bg-white rounded-2xl shadow p-4 mb-4">
+            {openCategoryKey === null ? (
+              <CategoryGridPage missions={missions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} />
+            ) : (
+              <CategoryDetailPage
+                categoryKey={openCategoryKey} missions={missions} currentUserId={profile.id} profile={profile}
+                visibleColumns={visibleColumns} visibleColumnsClosed={visibleColumnsClosed} visibleSections={visibleSections}
+                onOpen={setOpenMissionId} onBack={() => setOpenCategoryKey(null)}
+                projectNameById={projectNameById}
+                hiddenSet={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission}
+                starredSet={starredSet} onStar={starMission} onUnstar={unstarMission}
+                onOpenColumnSettings={() => setColumnSettingsContext("category")}
+              />
+            )}
+          </div>
+        )}
+
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
@@ -5268,17 +5497,19 @@ function Dashboard({ session, profile, setProfile }) {
           onChanged={() => { loadCurrentProjectMembers(openProjectId); loadProjects(); loadMissions(); }}
         />
       )}
-      {showColumnSettings && (
+      {columnSettingsContext && (
         <ColumnSettingsModal
           visibleColumns={visibleColumns} onToggleColumn={toggleColumn}
           visibleColumnsClosed={visibleColumnsClosed} onToggleColumnClosed={toggleColumnClosed}
           visibleSections={visibleSections} onToggleSection={toggleSection}
           columnOrder={profile.column_order} columnOrderClosed={profile.column_order_closed} onSaveColumnOrder={saveColumnOrder}
-          onClose={() => setShowColumnSettings(false)}
+          onClose={() => setColumnSettingsContext(null)}
+          showCategoryColumns={columnSettingsContext === "category"}
         />
       )}
       {openMissionId && (
         <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"}
+          isStarred={starredSet.has(openMissionId)} onStar={starMission} onUnstar={unstarMission} onDelete={deleteMission}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
     </div>
