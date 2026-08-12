@@ -286,6 +286,53 @@ table { border-collapse: collapse; width: 100%; }
 .border-slate-900 { border-color: #0f172a; }
 .opacity-40 { opacity: 0.4; }
 .w-10 { width: 2.5rem; }
+.w-12 { width: 3rem; }
+.w-14 { width: 3.5rem; }
+.w-16 { width: 4rem; }
+.w-3\.5 { width: 0.875rem; }
+.h-3\.5 { height: 0.875rem; }
+.h-auto { height: auto; }
+.rounded { border-radius: 0.25rem; }
+.max-w-3xl { max-width: 48rem; }
+.max-h-40 { max-height: 10rem; }
+.max-h-48 { max-height: 12rem; }
+.max-h-\[70vh\] { max-height: 70vh; }
+.min-h-\[2rem\] { min-height: 2rem; }
+.space-y-1 > * + * { margin-top: 0.25rem; }
+.space-y-1\.5 > * + * { margin-top: 0.375rem; }
+.gap-0\.5 { gap: 0.125rem; }
+.gap-1\.5 { gap: 0.375rem; }
+.p-0\.5 { padding: 0.125rem; }
+.px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
+.px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.mb-1\.5 { margin-bottom: 0.375rem; }
+.ml-1\.5 { margin-left: 0.375rem; }
+.-mt-1 { margin-top: -0.25rem; }
+.-right-0\.5 { right: -0.125rem; }
+.-top-0\.5 { top: -0.125rem; }
+.text-right { text-align: right; }
+.outline-none { outline: none; }
+.pointer-events-none { pointer-events: none; }
+.border-transparent { border-color: transparent; }
+.bg-black\/40 { background-color: rgba(0,0,0,0.4); }
+.text-amber-600 { color: #d97706; }
+.bg-violet-50 { background-color: #f5f3ff; }
+.border-violet-200 { border-color: #ddd6fe; }
+.text-violet-400 { color: #a78bfa; }
+.text-violet-500 { color: #8b5cf6; }
+.text-violet-700 { color: #6d28d9; }
+.disabled\:opacity-20:disabled { opacity: 0.2; }
+.disabled\:opacity-30:disabled { opacity: 0.3; }
+.disabled\:opacity-60:disabled { opacity: 0.6; }
+.hover\:bg-rose-100:hover { background-color: #ffe4e6; }
+.hover\:bg-slate-200:hover { background-color: #e2e8f0; }
+.hover\:text-blue-700:hover { color: #1d4ed8; }
+.hover\:text-rose-600:hover { color: #e11d48; }
+  .hover\:text-rose-500:hover { color: #f43f5e; }
+.hover\:text-slate-600:hover { color: #475569; }
+.hover\:text-violet-800:hover { color: #5b21b6; }
+.focus\:border-slate-300:focus { border-color: #cbd5e1; }
 .border-t { border-top-width: 1px; border-top-style: solid; border-color: #e2e8f0; }
 .border-b { border-bottom-width: 1px; border-bottom-style: solid; border-color: #e2e8f0; }
 .border-l { border-left-width: 1px; border-left-style: solid; border-color: #e2e8f0; }
@@ -343,6 +390,14 @@ table { border-collapse: collapse; width: 100%; }
   }
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+  /* AI 思考中彈窗的轉圈圖示 */
+  @keyframes ai-thinking-rotate { to { transform: rotate(360deg); } }
+  .ai-thinking-spinner {
+    width: 2rem; height: 2rem; border-radius: 9999px;
+    border: 3px solid #ede9fe; border-top-color: #7c3aed;
+    animation: ai-thinking-rotate 0.8s linear infinite;
+  }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -439,6 +494,26 @@ function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, hideC
             {confirmLabel || "確認"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// AI 呼叫進行中的全螢幕自繪彈窗：轉圈圖示 + 循環閃爍的「。。。」，避免使用者以為當掉。
+// 疊在既有的自繪 Modal 之上（z-index 比一般 Modal 的 z-50 高），呼叫結束（成功或失敗）就會自動消失。
+function AiThinkingModal({ label }) {
+  const [dotCount, setDotCount] = useState(1);
+  useEffect(() => {
+    const timer = setInterval(() => setDotCount(d => (d % 4) + 1), 400);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4" style={{ zIndex: 60 }}>
+      <div className="bg-white rounded-2xl shadow-xl px-8 py-6 flex flex-col items-center gap-3">
+        <div className="ai-thinking-spinner" />
+        <p className="text-sm text-slate-600 font-medium" style={{ minWidth: "6em", textAlign: "center" }}>
+          {label || "AI 思考中"}{"。".repeat(dotCount)}
+        </p>
       </div>
     </div>
   );
@@ -804,12 +879,16 @@ function remainingTimeText(dueDate) {
   return overdue ? `已逾期${value}` : `剩${value}`;
 }
 // 依「截止時間顯示設定」組出要顯示的文字，並視需要套用緊急度顏色
+// due_time_precise === false 時（AI 只判斷出日期、沒有精確時刻）一律只顯示日期，
+// 不印出實際存的「隔天 00:00」時刻，避免使用者誤以為那是 AI 判斷出的精確時間
 function renderDueDate(m, mode, colorOverride) {
   if (!m.due_date) return "—";
+  const precise = m.due_time_precise !== false;
+  const rawText = precise ? fmt(m.due_date) : fmtDate(m.due_date);
   let text;
   if (mode === "remaining_only") text = remainingTimeText(m.due_date);
-  else if (mode === "raw_plus_remaining") text = `${fmt(m.due_date)} (${remainingTimeText(m.due_date)})`;
-  else text = fmt(m.due_date);
+  else if (mode === "raw_plus_remaining") text = `${rawText} (${remainingTimeText(m.due_date)})`;
+  else text = rawText;
   if (!colorOverride) return text;
   const rd = remainingDays(m.due_date);
   const color = urgencyColor(urgencyScore(rd, m.scale || 1));
@@ -931,6 +1010,96 @@ function sortMissions(list, mode, weights) {
     arr.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
   return arr;
+}
+
+// =====================================================================
+// AI 任務辨識：十分類 + 子任務拆解 + 截止日判斷（result-ai.md 交接規格）
+// =====================================================================
+
+// 十個分類：family=義務性家庭事務／social=自主性人際往來，兩者刻意分開，避免混判
+const AI_CATEGORIES = ["work", "finance", "chores", "health", "family", "social", "learning", "travel", "admin", "other"];
+const AI_CATEGORY_LABELS = {
+  work: "工作", finance: "財務", chores: "雜務", health: "健康", family: "家庭事務",
+  social: "人際社交", learning: "學習", travel: "外出/旅行", admin: "行政/文書", other: "其他",
+};
+function primaryCategoryOf(scores) {
+  if (!scores) return null;
+  let best = null, bestScore = -1;
+  for (const k of AI_CATEGORIES) {
+    const v = Number(scores[k]) || 0;
+    if (v > bestScore) { bestScore = v; best = k; }
+  }
+  return best;
+}
+
+// 任務規模 S1~S5：純前端計算，不呼叫 AI。使用 checklist 目前的結構化細節即時算出
+function classifyTaskSize(count, totalMinutes, travelLegs, totalWaitDays) {
+  if (travelLegs >= 2 || totalWaitDays >= 2 || count >= 8 || totalMinutes > 480) return 5;
+  if (totalMinutes >= 240) return 4;
+  if (totalMinutes >= 120) return 3;
+  if (totalMinutes >= 30) return 2;
+  return 1;
+}
+// 把目前 checklist 內容彙總成 classifyTaskSize() 需要的四個數字
+function checklistAiStats(items) {
+  const list = items || [];
+  const count = list.length;
+  const totalMinutes = list.reduce((s, it) => s + (Number(it.estimated_minutes) || 0), 0);
+  const travelLegs = list.filter(it => it.requires_travel).length;
+  const totalWaitDays = list.reduce((s, it) => s + (Number(it.wait_days_after) || 0), 0);
+  return { count, totalMinutes, travelLegs, totalWaitDays };
+}
+// 是否有任何一項填了結構化細節（分鐘數/需移動/需等待）——不論項目是 AI 建議還是手動輸入，
+// 只要有結構化資料，就足以觸發「自動規模」判定
+function hasStructuredDetail(items) {
+  return (items || []).some(it => (Number(it.estimated_minutes) > 0) || it.requires_travel || (Number(it.wait_days_after) > 0));
+}
+function autoScaleFromChecklist(items) {
+  const { count, totalMinutes, travelLegs, totalWaitDays } = checklistAiStats(items);
+  return classifyTaskSize(count, totalMinutes, travelLegs, totalWaitDays);
+}
+
+// UTC 安全的「隔天 00:00」邊界運算：AI 只判斷出日期、沒有精確時刻時，
+// 逾期判斷邊界一律是隔天 00:00（不是當天 23:59:59，避免秒級模糊地帶）。
+// 務必用 Date.UTC()＋setUTCDate()，不能用本地時間建構＋toISOString()，
+// 否則台灣（UTC+8）會系統性少一天。
+function nextDayUtcMidnightISO(dateStr) {
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  return dt.toISOString();
+}
+// 精確時刻的情況：日期+時間直接組成 ISO（時區以使用者輸入的當地時間為準）
+function preciseDeadlineISO(dateStr, timeStr) {
+  return new Date(`${dateStr}T${timeStr}:00`).toISOString();
+}
+
+// 呼叫 Supabase Edge Function（ai-recognize），Gemini API key 只存在伺服器端，前端絕對拿不到
+// AI 呼叫失敗時，哪些錯誤代碼屬於「額度/頻率限制」，需要用明顯的自繪彈窗告知使用者
+// （其餘技術性錯誤——例如 AI 服務掛了、格式解析失敗——維持原本的行內紅字提示，並附上代碼方便回報給 admin）
+const AI_QUOTA_ERROR_CODES = new Set(["PERSONAL_MINUTE_LIMIT", "PERSONAL_DAILY_LIMIT", "GLOBAL_RATE_LIMIT", "GEMINI_QUOTA_EXCEEDED"]);
+const AI_QUOTA_ERROR_TITLES = {
+  PERSONAL_MINUTE_LIMIT: "查詢太頻繁了",
+  PERSONAL_DAILY_LIMIT: "今日次數已用完",
+  GLOBAL_RATE_LIMIT: "系統忙碌中",
+  GEMINI_QUOTA_EXCEEDED: "AI 服務額度已用完",
+};
+
+async function callAiRecognize(title) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { const e = new Error("請重新登入後再試"); e.code = "UNAUTHENTICATED"; throw e; }
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/ai-recognize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ title }),
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const e = new Error(json.error || "AI 辨識失敗，請稍後再試");
+    e.code = json.code || "UNKNOWN_ERROR";
+    throw e;
+  }
+  return json; // { date_type, extracted_deadline_date, extracted_deadline_time, category_scores, subtasks }
 }
 
 // 簡易圖示
@@ -1102,25 +1271,104 @@ function ResetPasswordScreen({ onDone }) {
 // =====================================================================
 // 新增任務 Modal
 // =====================================================================
+// 檢查清單左欄一個「已確定」項目的預設結構（不管來源是 AI 匯入還是手動新增，形狀一致）
+function newDraftItem(content, extra) {
+  return { _key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, estimated_minutes: null, requires_travel: false, wait_days_after: 0, from_ai: false, ...extra };
+}
+
 function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [dueDate, setDueDate] = useState("");
+  const [contentOpen, setContentOpen] = useState(false); // 任務內容預設收合，因為有 checklist 可以承載細節，不強迫填文字
+  const [dueDate, setDueDate] = useState(""); // YYYY-MM-DD
+  const [dueTime, setDueTime] = useState(""); // HH:MM，留空代表沒有精確時刻
   const [priority, setPriority] = useState("P2");
   const [scale, setScale] = useState(1);
+  const [scaleSource, setScaleSource] = useState("manual"); // manual | auto
+  const [scaleLocked, setScaleLocked] = useState(false); // 使用者是否曾按過「🔒 手動輸入」明確鎖住
   const [assigneeId, setAssigneeId] = useState(currentUserId);
-  const [checklistDraft, setChecklistDraft] = useState([]);
+  const [checklistDraft, setChecklistDraft] = useState([]); // 左欄：已確定
   const [checklistInput, setChecklistInput] = useState("");
+  const [detailOpenKey, setDetailOpenKey] = useState(null);
+  const [aiSuggestions, setAiSuggestions] = useState([]); // 右欄：AI 建議，尚未確認
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
+  const [aiErrCode, setAiErrCode] = useState(null); // 非額度類的技術性錯誤代碼，附在行內提示裡方便回報
+  const [aiQuotaModal, setAiQuotaModal] = useState(null); // { title, message }：額度/頻率類錯誤改用自繪彈窗
+  const [aiCategoryScores, setAiCategoryScores] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
+  // 任務規模自動判定：只要左欄任一項目有結構化細節，且使用者沒有明確鎖住手動，就自動接管
+  useEffect(() => {
+    if (scaleLocked) return;
+    if (!hasStructuredDetail(checklistDraft)) return;
+    setScaleSource("auto");
+    setScale(autoScaleFromChecklist(checklistDraft));
+  }, [checklistDraft, scaleLocked]);
+
+  function toggleScaleLock() {
+    if (scaleSource === "auto") { setScaleLocked(true); setScaleSource("manual"); }
+    else { setScaleLocked(false); if (hasStructuredDetail(checklistDraft)) { setScaleSource("auto"); setScale(autoScaleFromChecklist(checklistDraft)); } }
+  }
+
   function addChecklistDraftItem() {
     if (!checklistInput.trim()) return;
-    setChecklistDraft(list => [...list, checklistInput.trim()]);
+    setChecklistDraft(list => [...list, newDraftItem(checklistInput.trim())]);
     setChecklistInput("");
   }
-  function removeChecklistDraftItem(i) {
-    setChecklistDraft(list => list.filter((_, idx) => idx !== i));
+  function removeChecklistDraftItem(key) {
+    setChecklistDraft(list => list.filter(i => i._key !== key));
+  }
+  function updateDraftItem(key, patch) {
+    setChecklistDraft(list => list.map(i => i._key === key ? { ...i, ...patch } : i));
+  }
+  function moveDraftItem(index, dir) {
+    const target = index + dir;
+    if (target < 0 || target >= checklistDraft.length) return;
+    setChecklistDraft(list => {
+      const arr = [...list];
+      [arr[index], arr[target]] = [arr[target], arr[index]];
+      return arr;
+    });
+  }
+  // 右欄「←」：匯入左欄
+  function importSuggestion(sugg) {
+    setAiSuggestions(list => list.filter(s => s._key !== sugg._key));
+    setChecklistDraft(list => [...list, newDraftItem(sugg.title, {
+      estimated_minutes: sugg.estimated_minutes || null, requires_travel: !!sugg.requires_travel,
+      wait_days_after: sugg.wait_days_after || 0, from_ai: true,
+    })]);
+  }
+  // 左欄 AI 來源項目「→」：送回右欄建議（手動新增的項目沒有這個按鈕，只能移除）
+  function sendBackToSuggestions(item) {
+    setChecklistDraft(list => list.filter(i => i._key !== item._key));
+    setAiSuggestions(list => [...list, {
+      _key: item._key, title: item.content, estimated_minutes: item.estimated_minutes,
+      requires_travel: item.requires_travel, wait_days_after: item.wait_days_after,
+    }]);
+  }
+
+  async function runAiRecognize() {
+    if (!title.trim()) return;
+    setAiBusy(true); setAiErr(null); setAiErrCode(null);
+    try {
+      const result = await callAiRecognize(title.trim());
+      setAiCategoryScores(result.category_scores);
+      setAiSuggestions((result.subtasks || []).map((s, i) => ({ ...s, _key: `ai-${Date.now()}-${i}` })));
+      if (result.extracted_deadline_date) {
+        setDueDate(result.extracted_deadline_date);
+        setDueTime(result.extracted_deadline_time || "");
+      }
+    } catch (e) {
+      if (AI_QUOTA_ERROR_CODES.has(e.code)) {
+        setAiQuotaModal({ title: AI_QUOTA_ERROR_TITLES[e.code] || "已達使用上限", message: e.message });
+      } else {
+        setAiErr(e.message); setAiErrCode(e.code || null);
+      }
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   async function submit(e) {
@@ -1128,19 +1376,27 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     setBusy(true); setErr(null);
     try {
       const { data: { user } } = await sb.auth.getUser();
+      const duePrecise = !!dueTime;
+      const dueDateValue = !dueDate ? null : (duePrecise ? preciseDeadlineISO(dueDate, dueTime) : nextDayUtcMidnightISO(dueDate));
       const payload = {
         creator_id: user.id,
         assigned_id: assigneeId,
         project_id: projectId || null,
-        title, content,
-        priority, scale,
-        due_date: dueDate ? new Date(dueDate).toISOString() : null,
+        title, content: content.trim() || null,
+        priority, scale, scale_source: scaleSource,
+        due_date: dueDateValue, due_time_precise: dueDateValue ? duePrecise : true,
+        category_scores: aiCategoryScores, primary_category: aiCategoryScores ? primaryCategoryOf(aiCategoryScores) : null,
+        ai_raw_input: aiCategoryScores ? title : null,
       };
       const { data: created, error } = await sb.from("missions").insert(payload).select("id").single();
       if (error) throw error;
       if (checklistDraft.length > 0) {
         const { error: clError } = await sb.from("mission_checklist_items")
-          .insert(checklistDraft.map(text => ({ mission_id: created.id, content: text })));
+          .insert(checklistDraft.map(it => ({
+            mission_id: created.id, content: it.content,
+            estimated_minutes: it.estimated_minutes, requires_travel: it.requires_travel,
+            wait_days_after: it.wait_days_after, from_ai: it.from_ai,
+          })));
         if (clError) throw clError;
       }
       onCreated();
@@ -1151,8 +1407,9 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   }
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
           <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -1160,14 +1417,128 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         <form onSubmit={submit} className="space-y-3">
           <div>
             <label className="text-xs text-slate-500">任務標題</label>
-            <input required value={title} onChange={e => setTitle(e.target.value)}
-              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2 mt-1">
+              <input required value={title} onChange={e => setTitle(e.target.value)}
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <button type="button" onClick={runAiRecognize} disabled={aiBusy || !title.trim()}
+                className="shrink-0 bg-violet-50 text-violet-700 text-xs rounded-lg px-3 py-2 font-medium disabled:opacity-50 whitespace-nowrap">
+                {aiBusy ? "辨識中…" : "✨ AI 辨識"}
+              </button>
+            </div>
+            {aiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-1">{aiErr}{aiErrCode ? `（代碼：${aiErrCode}）` : ""}</p>}
           </div>
           <div>
-            <label className="text-xs text-slate-500">任務內容</label>
-            <textarea required rows={4} value={content} onChange={e => setContent(e.target.value)}
-              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500">任務內容（可留空）</label>
+              <button type="button" onClick={() => setContentOpen(v => !v)}
+                title={contentOpen ? "收合" : "展開填寫任務內容"}
+                className={"flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (contentOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>
+                +
+              </button>
+              {!contentOpen && content && <span className="text-xs text-slate-400">（已填寫，點「+」查看）</span>}
+            </div>
+            {contentOpen && (
+              <textarea rows={4} value={content} onChange={e => setContent(e.target.value)}
+                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            )}
           </div>
+
+          <div className="border-t border-slate-200 pt-3">
+            <label className="text-xs text-slate-500">檢查清單（可留空，之後也能在任務內頁新增）</label>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              {/* 左欄：決定的子任務 */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-1.5">決定的子任務</p>
+                <div className="space-y-1.5 min-h-[2rem]">
+                  {checklistDraft.map((it, i) => {
+                    const detailOpen = detailOpenKey === it._key;
+                    const hasDetail = it.estimated_minutes || it.requires_travel || it.wait_days_after;
+                    return (
+                      <React.Fragment key={it._key}>
+                        <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span contentEditable suppressContentEditableWarning
+                              onBlur={e => updateDraftItem(it._key, { content: e.target.textContent.trim() || it.content })}
+                              className="flex-1 text-sm text-slate-700 outline-none border-b border-transparent focus:border-slate-300">
+                              {it.content}
+                            </span>
+                            {it.from_ai && <span className="text-[10px] text-violet-400 shrink-0">✨</span>}
+                            <button type="button" onClick={() => setDetailOpenKey(detailOpen ? null : it._key)}
+                              className={"shrink-0 flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (detailOpen || hasDetail ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>+</button>
+                            <div className="flex gap-0.5 shrink-0">
+                              <button type="button" onClick={() => moveDraftItem(i, -1)} disabled={i === 0} className="p-0.5 rounded disabled:opacity-20 hover:bg-slate-200">
+                                <Icon.ChevronUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button type="button" onClick={() => moveDraftItem(i, 1)} disabled={i === checklistDraft.length - 1} className="p-0.5 rounded disabled:opacity-20 hover:bg-slate-200">
+                                <Icon.ChevronDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            {it.from_ai ? (
+                              <button type="button" onClick={() => sendBackToSuggestions(it)} title="送回建議欄" className="shrink-0 text-xs text-violet-500 hover:text-violet-700">→</button>
+                            ) : (
+                              <button type="button" onClick={() => removeChecklistDraftItem(it._key)} title="移除" className="shrink-0 text-rose-500 hover:text-rose-600">
+                                <Icon.Trash className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {detailOpen && (
+                          <div className="flex flex-wrap items-center gap-2 bg-blue-50 rounded-lg px-2.5 py-1.5 -mt-1 text-xs text-slate-600">
+                            <label className="flex items-center gap-1">分鐘
+                              <input type="number" min="0" value={it.estimated_minutes || ""}
+                                onChange={e => updateDraftItem(it._key, { estimated_minutes: e.target.value ? Number(e.target.value) : null })}
+                                className="w-14 border border-slate-300 rounded px-1 py-0.5 text-xs" />
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <input type="checkbox" checked={!!it.requires_travel}
+                                onChange={e => updateDraftItem(it._key, { requires_travel: e.target.checked })} className="w-3.5 h-3.5" />
+                              🚗需移動
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <input type="checkbox" checked={(it.wait_days_after || 0) > 0}
+                                onChange={e => updateDraftItem(it._key, { wait_days_after: e.target.checked ? 1 : 0 })} className="w-3.5 h-3.5" />
+                              ⏳需等待
+                            </label>
+                            {(it.wait_days_after || 0) > 0 && (
+                              <label className="flex items-center gap-1">天數
+                                <input type="number" min="1" value={it.wait_days_after}
+                                  onChange={e => updateDraftItem(it._key, { wait_days_after: Number(e.target.value) || 1 })}
+                                  className="w-12 border border-slate-300 rounded px-1 py-0.5 text-xs" />
+                              </label>
+                            )}
+                          </div>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <input value={checklistInput} onChange={e => setChecklistInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addChecklistDraftItem(); } }}
+                    maxLength={150} placeholder="+ 自訂子任務…"
+                    className="flex-1 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                  <button type="button" onClick={addChecklistDraftItem} className="bg-slate-100 text-slate-600 text-xs rounded-lg px-2.5 py-1.5">新增</button>
+                </div>
+              </div>
+              {/* 右欄：AI 建議 */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 mb-1.5">AI 建議</p>
+                <div className="space-y-1.5 min-h-[2rem]">
+                  {aiSuggestions.length === 0 && <p className="text-xs text-slate-300 px-1">按上方「✨ AI 辨識」會在這裡列出建議</p>}
+                  {aiSuggestions.map(s => (
+                    <div key={s._key} className="flex items-center gap-1.5 bg-violet-50 rounded-lg px-2.5 py-1.5">
+                      <button type="button" onClick={() => importSuggestion(s)} title="匯入左欄" className="shrink-0 text-violet-600 hover:text-violet-800 font-bold">←</button>
+                      <span className="flex-1 text-sm text-slate-700">{s.title}</span>
+                      <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">
+                        {s.estimated_minutes || 0}分{s.requires_travel ? " 🚗" : ""}{s.wait_days_after ? ` ⏳${s.wait_days_after}天` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="text-xs text-slate-500">重要性</label>
             <div className="flex gap-2 mt-1">
@@ -1180,11 +1551,19 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             </div>
           </div>
           <div>
-            <label className="text-xs text-slate-500">任務規模</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-slate-500">任務規模{scaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
+              <button type="button" onClick={toggleScaleLock}
+                disabled={scaleSource === "manual" && !scaleLocked && !hasStructuredDetail(checklistDraft)}
+                title={scaleSource === "auto" ? "細節未完全決定，先手動輸入規模" : "改回依 checklist 自動判定"}
+                className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                {scaleSource === "auto" ? "🔒 手動輸入" : "🔄 改回自動判定"}
+              </button>
+            </div>
             <div className="flex gap-2 mt-1">
               {SCALE_LEVELS.map(n => (
-                <button key={n} type="button" onClick={() => setScale(n)}
-                  className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                <button key={n} type="button" disabled={scaleSource === "auto"} onClick={() => setScale(n)}
+                  className={"flex-1 py-2 rounded-lg text-sm font-medium text-center disabled:opacity-60 " + (scale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                   {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                 </button>
               ))}
@@ -1192,9 +1571,14 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-500">截止時間（可留空）</label>
-              <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              <label className="text-xs text-slate-500">截止日期（可留空）</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="time" value={dueTime} onChange={e => setDueTime(e.target.value)} disabled={!dueDate}
+                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:opacity-50" />
+              </div>
+              <p className="text-xs text-slate-400 mt-1">時刻留空＝只有日期，逾期以隔天 00:00 為界</p>
             </div>
             <div>
               <label className="text-xs text-slate-500">指派給</label>
@@ -1207,28 +1591,6 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
               </select>
             </div>
           </div>
-          <div className="border-t border-slate-200 pt-3">
-            <label className="text-xs text-slate-500">檢查清單（可留空，之後也能在任務內頁新增）</label>
-            {checklistDraft.length > 0 && (
-              <div className="space-y-1.5 mt-2">
-                {checklistDraft.map((text, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-1.5">
-                    <span className="flex-1 text-sm text-slate-700">{text}</span>
-                    <button type="button" onClick={() => removeChecklistDraftItem(i)} title="移除" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                      <Icon.Trash className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2 mt-2">
-              <input value={checklistInput} onChange={e => setChecklistInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addChecklistDraftItem(); } }}
-                maxLength={150} placeholder="輸入項目後按新增…"
-                className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
-              <button type="button" onClick={addChecklistDraftItem} className="bg-slate-100 text-slate-600 text-xs rounded-lg px-3 py-1.5">新增</button>
-            </div>
-          </div>
           {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
           <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center disabled:opacity-50">
             {busy ? "建立中…" : "建立任務"}
@@ -1236,6 +1598,17 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         </form>
       </div>
     </div>
+    {aiBusy && <AiThinkingModal label="AI 思考中" />}
+    {aiQuotaModal && (
+      <ConfirmModal
+        title={aiQuotaModal.title}
+        message={aiQuotaModal.message}
+        confirmLabel="知道了" hideCancel
+        onConfirm={() => setAiQuotaModal(null)}
+        onCancel={() => setAiQuotaModal(null)}
+      />
+    )}
+    </>
   );
 }
 
@@ -1280,9 +1653,12 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [editingBody, setEditingBody] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
+  const [editContentOpen, setEditContentOpen] = useState(false);
   const [editDue, setEditDue] = useState("");
+  const [editDueTime, setEditDueTime] = useState("");
   const [editPriority, setEditPriority] = useState("P2");
   const [editScale, setEditScale] = useState(1);
+  const [editScaleSource, setEditScaleSource] = useState("manual");
   const [editAssigneeId, setEditAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -1291,6 +1667,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [confirmSwitch, setConfirmSwitch] = useState(null); // { type: "to_personal" } | { type: "to_project", project }
   const [switchBusy, setSwitchBusy] = useState(false);
   const [switchError, setSwitchError] = useState(null);
+  const [detailChecklistId, setDetailChecklistId] = useState(null); // 展開「+」細節面板的項目 id
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
+  const [aiErrCode, setAiErrCode] = useState(null);
+  const [aiQuotaModal, setAiQuotaModal] = useState(null); // { title, message }
+  const [aiSuggestions, setAiSuggestions] = useState([]); // 重新辨識的建議子任務（右欄，待匯入）
+  const [aiCategoryScores, setAiCategoryScores] = useState(null);
+  const [confirmDeadlineOverwrite, setConfirmDeadlineOverwrite] = useState(null); // { date, time }
 
   const load = useCallback(async () => {
     const [missionRes, updatesRes, checklistRes] = await Promise.all([
@@ -1306,11 +1690,28 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     const m = missionRes.data;
     setMission(m);
     if (m) {
-      setEditTitle(m.title); setEditContent(m.content);
-      setEditDue(m.due_date ? m.due_date.slice(0, 16) : "");
+      setEditTitle(m.title); setEditContent(m.content || "");
+      setEditContentOpen(!!m.content);
+      if (m.due_date) {
+        const precise = m.due_time_precise !== false;
+        if (precise) {
+          setEditDue(m.due_date.slice(0, 10));
+          setEditDueTime(m.due_date.slice(11, 16));
+        } else {
+          // due_date 實際存的是隔天 00:00 UTC 邊界，編輯欄位要退回顯示原本那一天
+          const back = new Date(m.due_date);
+          back.setUTCDate(back.getUTCDate() - 1);
+          setEditDue(back.toISOString().slice(0, 10));
+          setEditDueTime("");
+        }
+      } else {
+        setEditDue(""); setEditDueTime("");
+      }
       setEditPriority(m.priority || "P2");
       setEditScale(m.scale || 1);
+      setEditScaleSource(m.scale_source || "manual");
       setEditAssigneeId(m.assigned_id);
+      setAiSuggestions([]); setAiCategoryScores(null); setAiErr(null);
       if (m.project_id) {
         const { data: pm } = await sb.from("project_members")
           .select("user:profiles!project_members_user_id_fkey(id,display_name)")
@@ -1336,6 +1737,19 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       .subscribe();
     return () => { sb.removeChannel(channel); };
   }, [missionId, load]);
+
+  // 任務規模自動判定：scale_source='auto' 且 checklist 有任一項目填了結構化細節（分鐘數/需移動/需等待，
+  // 不論來源是 AI 建議還是使用者手動填）時，即時依 checklist 內容重算 scale 並寫回資料庫
+  useEffect(() => {
+    if (!mission || mission.scale_source !== "auto") return;
+    if (!hasStructuredDetail(checklist)) return;
+    const nextScale = autoScaleFromChecklist(checklist);
+    if (nextScale !== mission.scale) {
+      sb.from("missions").update({ scale: nextScale }).eq("id", missionId).then(({ error }) => {
+        if (!error) setMission(m => m ? { ...m, scale: nextScale } : m);
+      });
+    }
+  }, [checklist, mission?.scale_source, mission?.scale, missionId]);
 
   if (!mission) return null;
 
@@ -1441,6 +1855,107 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     }
   }
 
+  // 更新單一項目的結構化細節（分鐘數/需移動/需等待天數）；不論項目來源，填了細節就可能觸發自動規模
+  async function updateChecklistDetail(item, patch) {
+    setChecklistErr(null);
+    const previous = item;
+    setChecklist(list => list.map(i => i.id === item.id ? { ...i, ...patch } : i));
+    const { error } = await sb.from("mission_checklist_items").update(patch).eq("id", item.id);
+    if (error) {
+      setChecklistErr(error.message);
+      setChecklist(list => list.map(i => i.id === item.id ? previous : i));
+    }
+  }
+
+  // 「🔒 手動輸入」／「🔄 改回自動判定」：切換 scale_source
+  async function toggleScaleSource() {
+    const next = mission.scale_source === "auto" ? "manual" : "auto";
+    const { error } = await sb.from("missions").update({ scale_source: next }).eq("id", missionId);
+    if (!error) {
+      setMission(m => ({ ...m, scale_source: next }));
+      setEditScaleSource(next);
+      if (next === "auto" && hasStructuredDetail(checklist)) {
+        const s = autoScaleFromChecklist(checklist);
+        await sb.from("missions").update({ scale: s }).eq("id", missionId);
+        setMission(m => ({ ...m, scale: s }));
+      }
+    } else {
+      setErr(error.message);
+    }
+  }
+
+  // 重新 AI 辨識：只在編輯模式、依目前的 editTitle 重新呼叫。deadline 若原本已有值且判斷出不同結果，
+  // 需要使用者在自繪 ConfirmModal 二次確認才覆蓋；scale 交給既有的自動判定 effect 處理，不需額外確認。
+  async function rerunAiRecognize() {
+    if (!editTitle.trim()) return;
+    setAiBusy(true); setAiErr(null); setAiErrCode(null);
+    try {
+      const result = await callAiRecognize(editTitle.trim());
+      setAiCategoryScores(result.category_scores);
+      setAiSuggestions((result.subtasks || []).map((s, i) => ({ ...s, _key: `ai-${Date.now()}-${i}` })));
+      if (result.extracted_deadline_date) {
+        const hasExisting = !!editDue;
+        const changed = editDue !== result.extracted_deadline_date || editDueTime !== (result.extracted_deadline_time || "");
+        if (hasExisting && changed) {
+          setConfirmDeadlineOverwrite({ date: result.extracted_deadline_date, time: result.extracted_deadline_time || "" });
+        } else if (!hasExisting) {
+          setEditDue(result.extracted_deadline_date);
+          setEditDueTime(result.extracted_deadline_time || "");
+        }
+      }
+    } catch (e) {
+      if (AI_QUOTA_ERROR_CODES.has(e.code)) {
+        setAiQuotaModal({ title: AI_QUOTA_ERROR_TITLES[e.code] || "已達使用上限", message: e.message });
+      } else {
+        setAiErr(e.message); setAiErrCode(e.code || null);
+      }
+    } finally {
+      setAiBusy(false);
+    }
+  }
+  function applyDeadlineOverwrite() {
+    setEditDue(confirmDeadlineOverwrite.date);
+    setEditDueTime(confirmDeadlineOverwrite.time);
+    setConfirmDeadlineOverwrite(null);
+  }
+  // 右欄「←」匯入：把 AI 建議的子任務直接寫入 checklist（from_ai=true），並從建議清單移除
+  async function importAiSuggestion(sugg) {
+    setAiSuggestions(list => list.filter(s => s._key !== sugg._key));
+    const { error } = await sb.from("mission_checklist_items").insert({
+      mission_id: missionId, content: sugg.title,
+      estimated_minutes: sugg.estimated_minutes || null,
+      requires_travel: !!sugg.requires_travel,
+      wait_days_after: sugg.wait_days_after || 0,
+      from_ai: true,
+    });
+    if (error) { setChecklistErr(error.message); setAiSuggestions(list => [...list, sugg]); }
+    else {
+      if (mission.scale_source !== "auto") await sb.from("missions").update({ scale_source: "auto" }).eq("id", missionId).then(() => setMission(m => ({ ...m, scale_source: "auto" })));
+      load();
+    }
+  }
+  // 不要的建議「✕」：純粹從右欄移除，不寫入 checklist
+  function discardSuggestion(key) {
+    setAiSuggestions(list => list.filter(s => s._key !== key));
+  }
+  // 現有 checklist 項目「→」：送回右欄建議（從 checklist 刪除，變成可重新匯入的建議卡片），
+  // 讓「並排、互相推來推去」的操作跟新增任務時的雙欄邏輯一致
+  async function sendChecklistItemToSuggestions(item) {
+    setChecklistErr(null);
+    setChecklist(list => list.filter(i => i.id !== item.id));
+    const { error } = await sb.from("mission_checklist_items").delete().eq("id", item.id);
+    if (error) {
+      setChecklistErr(error.message);
+      setChecklist(list => [...list, item].sort((a, b) => (a.position || 0) - (b.position || 0)));
+    } else {
+      setAiSuggestions(list => [...list, {
+        _key: `back-${item.id}-${Date.now()}`, title: item.content,
+        estimated_minutes: item.estimated_minutes, requires_travel: item.requires_travel,
+        wait_days_after: item.wait_days_after,
+      }]);
+    }
+  }
+
   function startSwitch() {
     setSwitchError(null);
     if (mission.project_id) setConfirmSwitch({ type: "to_personal" });
@@ -1470,13 +1985,18 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   async function saveBodyEdit() {
     setBusy(true); setErr(null);
     try {
+      const duePrecise = !!editDueTime;
+      const dueDateValue = !editDue ? null : (duePrecise ? preciseDeadlineISO(editDue, editDueTime) : nextDayUtcMidnightISO(editDue));
       const { error } = await sb.from("missions").update({
-        title: editTitle, content: editContent, priority: editPriority, scale: editScale,
-        due_date: editDue ? new Date(editDue).toISOString() : null,
+        title: editTitle, content: editContent.trim() || null, priority: editPriority,
+        scale: editScale, scale_source: editScaleSource,
+        due_date: dueDateValue, due_time_precise: dueDateValue ? duePrecise : true,
         assigned_id: editAssigneeId,
+        ...(aiCategoryScores ? { category_scores: aiCategoryScores, primary_category: primaryCategoryOf(aiCategoryScores), ai_raw_input: editTitle } : {}),
       }).eq("id", missionId);
       if (error) throw error;
       setEditingBody(false);
+      setAiCategoryScores(null);
       await load();
       onChanged();
     } catch (e2) { setErr(e2.message); } finally { setBusy(false); }
@@ -1519,7 +2039,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         {!editingBody ? (
           <div>
             <h2 className="text-xl font-bold mb-2">{mission.title}</h2>
-            <p className="whitespace-pre-wrap text-sm text-slate-700 mb-3">{mission.content}</p>
+            {mission.content && <p className="whitespace-pre-wrap text-sm text-slate-700 mb-3">{mission.content}</p>}
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 mb-3">
               <div>建立成員：{mission.creator?.display_name}</div>
               <div>指派給：{mission.assignee?.display_name}</div>
@@ -1527,7 +2047,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div>最後更新：{fmt(mission.updated_at)}</div>
               <div>截止時間：{renderDueDate(mission, dueDateDisplayDetail, dueDateColorOverride)}</div>
               <div>重要性：{renderPriorityText(priorityLabels, priorityDisplay, "detail_view", mission.priority, priorityColorOverride)}</div>
-              <div>任務規模：{renderScaleText(scaleLabels, scaleDisplay, "detail_view", mission.scale, scaleColorOverride)}</div>
+              <div>任務規模：{renderScaleText(scaleLabels, scaleDisplay, "detail_view", mission.scale, scaleColorOverride)}
+                {(isCreator || isAssignee) && !isClosed && (
+                  <button onClick={toggleScaleSource} title={mission.scale_source === "auto" ? "改成手動輸入" : "改回依 checklist 自動判定"}
+                    className="ml-1.5 text-xs text-slate-400 hover:text-slate-600">
+                    {mission.scale_source === "auto" ? "🤖" : "🔒"}
+                  </button>
+                )}
+              </div>
               <div>緊急度：{(() => { const rd = remainingDays(mission.due_date); const u = rd === null ? null : urgencyScore(rd, mission.scale || 1); return renderUrgencyText(urgencyLabels, urgencyDisplay, "detail_view", u, urgencyColorOverride); })()}</div>
             </div>
             <div className="text-xs text-slate-400 mb-3">
@@ -1545,8 +2072,29 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           </div>
         ) : (
           <div className="space-y-2 mb-3">
-            <input value={editTitle} onChange={e => setEditTitle(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
-            <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2 items-start">
+              <input value={editTitle} onChange={e => setEditTitle(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
+              <button type="button" onClick={rerunAiRecognize} disabled={aiBusy || !editTitle.trim()}
+                title="依目前標題重新辨識截止日期／子任務建議"
+                className="shrink-0 bg-violet-50 text-violet-700 text-xs rounded-lg px-3 py-2 font-medium disabled:opacity-50 whitespace-nowrap">
+                {aiBusy ? "辨識中…" : "✨ AI 辨識"}
+              </button>
+            </div>
+            {aiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{aiErr}{aiErrCode ? `（代碼：${aiErrCode}）` : ""}</p>}
+            <div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500">任務內容（可留空）</label>
+                <button type="button" onClick={() => setEditContentOpen(v => !v)}
+                  title={editContentOpen ? "收合" : "展開編輯任務內容"}
+                  className={"flex items-center justify-center w-5 h-5 rounded text-xs font-bold " + (editContentOpen ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>
+                  +
+                </button>
+                {!editContentOpen && editContent && <span className="text-xs text-slate-400">（已填寫，點「+」查看）</span>}
+              </div>
+              {editContentOpen && (
+                <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              )}
+            </div>
             <div>
               <label className="text-xs text-slate-500">重要性</label>
               <div className="flex gap-2 mt-1">
@@ -1559,17 +2107,41 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </div>
             </div>
             <div>
-              <label className="text-xs text-slate-500">任務規模</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-500">任務規模{editScaleSource === "auto" ? "（🤖 依 checklist 自動判定）" : ""}</label>
+                <button type="button" onClick={() => {
+                    const next = editScaleSource === "auto" ? "manual" : "auto";
+                    setEditScaleSource(next);
+                    if (next === "auto" && hasStructuredDetail(checklist)) setEditScale(autoScaleFromChecklist(checklist));
+                  }}
+                  disabled={editScaleSource === "manual" && !hasStructuredDetail(checklist)}
+                  title={editScaleSource === "auto" ? "改成手動輸入（細節未完全決定時可先手動輸入規模）" : "改回依 checklist 自動判定"}
+                  className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                  {editScaleSource === "auto" ? "🔒 手動輸入" : "🔄 改回自動判定"}
+                </button>
+              </div>
               <div className="flex gap-2 mt-1">
                 {SCALE_LEVELS.map(n => (
-                  <button key={n} type="button" onClick={() => setEditScale(n)}
-                    className={"flex-1 py-2 rounded-lg text-sm font-medium text-center " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
+                  <button key={n} type="button" disabled={editScaleSource === "auto"}
+                    onClick={() => setEditScale(n)}
+                    className={"flex-1 py-2 rounded-lg text-sm font-medium text-center disabled:opacity-60 " + (editScale === n ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>
                     {renderScaleText(scaleLabels, scaleDisplay, "detail_edit", n, scaleColorOverride)}
                   </button>
                 ))}
               </div>
             </div>
-            <input type="datetime-local" value={editDue} onChange={e => setEditDue(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div>
+              <label className="text-xs text-slate-500">截止日期（可留空）</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <input type="date" value={editDue} onChange={e => setEditDue(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="time" value={editDueTime} onChange={e => setEditDueTime(e.target.value)} disabled={!editDue}
+                  placeholder="時刻（可留空）" className="border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:opacity-50" />
+              </div>
+              <p className="text-xs text-slate-400 mt-1">時刻留空代表只有日期沒有精確時間，逾期判斷會以隔天 00:00 為界</p>
+            </div>
+            {aiSuggestions.length > 0 && (
+              <p className="text-xs text-violet-600 bg-violet-50 rounded-lg px-3 py-2">✨ AI 有 {aiSuggestions.length} 項子任務建議，在下方「檢查清單」區塊可以匯入或調整</p>
+            )}
             <div>
               <label className="text-xs text-slate-500">指派給{mission.project_id ? "（僅限此專案成員）" : "（自己或好友）"}</label>
               <select value={editAssigneeId} onChange={e => setEditAssigneeId(e.target.value)}
@@ -1581,9 +2153,28 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <div className="flex gap-2">
               <button onClick={saveBodyEdit} disabled={busy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">儲存</button>
-              <button onClick={() => setEditingBody(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+              <button onClick={() => { setEditingBody(false); setAiSuggestions([]); setAiCategoryScores(null); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
             </div>
           </div>
+        )}
+        {confirmDeadlineOverwrite && (
+          <ConfirmModal
+            title="覆蓋截止時間？"
+            message={`AI 重新判斷出的截止時間是 ${confirmDeadlineOverwrite.date}${confirmDeadlineOverwrite.time ? " " + confirmDeadlineOverwrite.time : ""}，要覆蓋目前的 ${editDue}${editDueTime ? " " + editDueTime : ""} 嗎？`}
+            confirmLabel="覆蓋" cancelLabel="保留原值"
+            onConfirm={applyDeadlineOverwrite}
+            onCancel={() => setConfirmDeadlineOverwrite(null)}
+          />
+        )}
+        {aiBusy && <AiThinkingModal label="AI 思考中" />}
+        {aiQuotaModal && (
+          <ConfirmModal
+            title={aiQuotaModal.title}
+            message={aiQuotaModal.message}
+            confirmLabel="知道了" hideCancel
+            onConfirm={() => setAiQuotaModal(null)}
+            onCancel={() => setAiQuotaModal(null)}
+          />
         )}
 
         {mission.final_comment && (
@@ -1621,59 +2212,134 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 <div className="h-2 bg-blue-600" style={{ width: `${checklistProgress(checklist, mission.status)}%` }} />
               </div>
             )}
-            <div className="space-y-1.5">
-              {checklist.map((item, index) => {
-                const isAuthor = item.created_by === currentUser.id;
-                const canEditDelete = isAuthor && canToggleChecklist;
-                const isEditing = editingChecklistId === item.id;
-                return (
-                  <div key={item.id} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
-                    <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
-                      onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
-                    {isEditing ? (
-                      <input value={editingChecklistText} onChange={e => setEditingChecklistText(e.target.value)}
-                        maxLength={150} autoFocus
-                        onKeyDown={e => { if (e.key === "Enter") saveChecklistEdit(item.id); }}
-                        className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-sm" />
-                    ) : (
-                      <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>{item.content}</span>
-                    )}
-                    {reorderChecklistMode ? (
-                      <div className="flex gap-1">
-                        <button onClick={() => moveChecklistItem(index, -1)} disabled={index === 0} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
-                          <Icon.ChevronUp className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => moveChecklistItem(index, 1)} disabled={index === checklist.length - 1} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
-                          <Icon.ChevronDown className="w-4 h-4" />
+            <div className={aiSuggestions.length > 0 ? "grid grid-cols-2 gap-3" : ""}>
+              <div>
+                {aiSuggestions.length > 0 && <p className="text-xs font-semibold text-slate-500 mb-1.5">目前的檢查清單</p>}
+                <div className="space-y-1.5">
+                  {checklist.map((item, index) => {
+                    const isAuthor = item.created_by === currentUser.id;
+                    const canEditDelete = isAuthor && canToggleChecklist;
+                    const isEditing = editingChecklistId === item.id;
+                    const hasDetail = (item.estimated_minutes || item.requires_travel || item.wait_days_after);
+                    const detailOpen = detailChecklistId === item.id;
+                    return (
+                      <React.Fragment key={item.id}>
+                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                        <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
+                          onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
+                        {isEditing ? (
+                          <input value={editingChecklistText} onChange={e => setEditingChecklistText(e.target.value)}
+                            maxLength={150} autoFocus
+                            onKeyDown={e => { if (e.key === "Enter") saveChecklistEdit(item.id); }}
+                            className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-sm" />
+                        ) : (
+                          <span className={"flex-1 text-sm " + (item.is_checked ? "line-through text-slate-400" : "text-slate-700")}>
+                            {item.content}
+                            {item.from_ai && <span className="ml-1.5 text-[10px] text-violet-400">✨</span>}
+                            {hasDetail && <span className="ml-1.5 text-xs text-slate-400">
+                              {item.estimated_minutes ? `${item.estimated_minutes}分` : ""}{item.requires_travel ? " 🚗" : ""}{item.wait_days_after ? ` ⏳${item.wait_days_after}天` : ""}
+                            </span>}
+                          </span>
+                        )}
+                        {!reorderChecklistMode && canToggleChecklist && (
+                          <button onClick={() => setDetailChecklistId(detailOpen ? null : item.id)} title="時間／移動／等待細節"
+                            className={"flex items-center justify-center w-6 h-6 rounded-lg text-xs font-bold " + (detailOpen || hasDetail ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                            +
+                          </button>
+                        )}
+                        {!reorderChecklistMode && canToggleChecklist && aiSuggestions.length > 0 && !isClosed && (
+                          <button onClick={() => sendChecklistItemToSuggestions(item)} title="送回右欄建議（會從清單移除）"
+                            className="flex items-center justify-center text-xs text-violet-500 hover:text-violet-700">→</button>
+                        )}
+                        {reorderChecklistMode ? (
+                          <div className="flex gap-1">
+                            <button onClick={() => moveChecklistItem(index, -1)} disabled={index === 0} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
+                              <Icon.ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => moveChecklistItem(index, 1)} disabled={index === checklist.length - 1} className="p-1 rounded disabled:opacity-30 hover:bg-slate-100">
+                              <Icon.ChevronDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            {canEditDelete && (
+                              <button onClick={() => isEditing ? saveChecklistEdit(item.id) : startEditChecklist(item)} title="編輯內容"
+                                className={"flex items-center justify-center w-6 h-6 rounded-lg " + (isEditing ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-600")}>
+                                <Icon.Edit className="w-4 h-4" />
+                              </button>
+                            )}
+                            {canEditDelete && !isEditing && (
+                              <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                                <Icon.Trash className="w-4 h-4" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {detailOpen && (
+                        <div className="flex flex-wrap items-center gap-3 bg-blue-50 rounded-lg px-3 py-2 -mt-1 text-xs text-slate-600">
+                          <label className="flex items-center gap-1.5">
+                            分鐘數
+                            <input type="number" min="0" value={item.estimated_minutes || ""} disabled={!canToggleChecklist}
+                              onChange={e => updateChecklistDetail(item, { estimated_minutes: e.target.value ? Number(e.target.value) : null })}
+                              className="w-16 border border-slate-300 rounded px-1.5 py-0.5 text-xs" />
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            <input type="checkbox" checked={!!item.requires_travel} disabled={!canToggleChecklist}
+                              onChange={e => updateChecklistDetail(item, { requires_travel: e.target.checked })} className="w-3.5 h-3.5" />
+                            🚗 需移動
+                          </label>
+                          <label className="flex items-center gap-1.5">
+                            <input type="checkbox" checked={(item.wait_days_after || 0) > 0} disabled={!canToggleChecklist}
+                              onChange={e => updateChecklistDetail(item, { wait_days_after: e.target.checked ? 1 : 0 })} className="w-3.5 h-3.5" />
+                            ⏳ 需等待
+                          </label>
+                          {(item.wait_days_after || 0) > 0 && (
+                            <label className="flex items-center gap-1.5">
+                              天數
+                              <input type="number" min="1" value={item.wait_days_after} disabled={!canToggleChecklist}
+                                onChange={e => updateChecklistDetail(item, { wait_days_after: Number(e.target.value) || 1 })}
+                                className="w-14 border border-slate-300 rounded px-1.5 py-0.5 text-xs" />
+                            </label>
+                          )}
+                        </div>
+                      )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                {(isCreator || isAssignee) && !isClosed && (
+                  <form onSubmit={addChecklistItem} className="flex gap-2 mt-2">
+                    <input value={newChecklistText} onChange={e => setNewChecklistText(e.target.value)}
+                      maxLength={150} placeholder="新增檢查清單項目…"
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                    <button type="submit" className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">新增</button>
+                  </form>
+                )}
+              </div>
+              {aiSuggestions.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs font-semibold text-slate-500">✨ AI 建議</p>
+                    <button type="button" onClick={() => setAiSuggestions([])} className="text-xs text-slate-400 hover:text-slate-600">清空建議</button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {aiSuggestions.map(s => (
+                      <div key={s._key} className="flex items-center gap-1.5 bg-violet-50 rounded-lg px-2.5 py-1.5">
+                        <button type="button" onClick={() => importAiSuggestion(s)} title="匯入左欄" className="shrink-0 text-violet-600 hover:text-violet-800 font-bold">←</button>
+                        <span className="flex-1 text-sm text-slate-700">{s.title}</span>
+                        <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">
+                          {s.estimated_minutes || 0}分{s.requires_travel ? " 🚗" : ""}{s.wait_days_after ? ` ⏳${s.wait_days_after}天` : ""}
+                        </span>
+                        <button type="button" onClick={() => discardSuggestion(s._key)} title="移除建議（不匯入）" className="shrink-0 text-slate-400 hover:text-rose-500">
+                          <Icon.Trash className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    ) : (
-                      <>
-                        {canEditDelete && (
-                          <button onClick={() => isEditing ? saveChecklistEdit(item.id) : startEditChecklist(item)} title="編輯內容"
-                            className={"flex items-center justify-center w-6 h-6 rounded-lg " + (isEditing ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-600")}>
-                            <Icon.Edit className="w-4 h-4" />
-                          </button>
-                        )}
-                        {canEditDelete && !isEditing && (
-                          <button onClick={() => deleteChecklistItem(item.id)} title="刪除項目" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                            <Icon.Trash className="w-4 h-4" />
-                          </button>
-                        )}
-                      </>
-                    )}
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              )}
             </div>
-            {(isCreator || isAssignee) && !isClosed && (
-              <form onSubmit={addChecklistItem} className="flex gap-2 mt-2">
-                <input value={newChecklistText} onChange={e => setNewChecklistText(e.target.value)}
-                  maxLength={150} placeholder="新增檢查清單項目…"
-                  className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
-                <button type="submit" className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">新增</button>
-              </form>
-            )}
             {checklistErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{checklistErr}</p>}
           </div>
         )}
