@@ -1796,7 +1796,12 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     } else if (missionRes.error) {
       console.error("load mission failed:", missionRes.error);
     }
-    if (m) {
+    // 只有「不在編輯模式」時才重新灌入編輯表單的草稿欄位（標題/內容/截止時間/AI 建議…）。
+    // 這幾個欄位是使用者正在動的東西——如果每次 load() 都無腦重灌，會出現兩種壞行為：
+    // 1. 使用者在編輯標題打到一半，被 realtime 觸發的 load() 蓋掉打字內容
+    // 2. AI 建議清單每匯入/送回一筆（觸發 checklist 變動 → realtime → load()）就被清空成 []，
+    //    造成「備選子任務空間動不動就消失」——不是 log 即時刷新的問題，就是這裡的無條件 reset
+    if (m && !editingBody) {
       setEditTitle(m.title); setEditContent(m.content || "");
       setEditContentOpen(!!m.content);
       if (m.due_date) {
@@ -1819,6 +1824,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setEditScaleSource(m.scale_source || "manual");
       setEditAssigneeId(m.assigned_id);
       setAiSuggestions([]); setAiCategoryScores(null); setAiErr(null);
+    }
+    if (m) {
       if (m.project_id) {
         const { data: pm } = await sb.from("project_members")
           .select("user:profiles!project_members_user_id_fkey(id,display_name)")
@@ -1830,7 +1837,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     }
     setUpdates(updatesRes.data || []);
     setChecklist(checklistRes.data || []);
-  }, [missionId]);
+  }, [missionId, editingBody]);
 
   useEffect(() => { load(); }, [load]);
 
