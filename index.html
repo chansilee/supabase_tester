@@ -403,6 +403,9 @@ table { border-collapse: collapse; width: 100%; }
     border: 3px solid #ede9fe; border-top-color: #7c3aed;
     animation: ai-thinking-rotate 0.8s linear infinite;
   }
+
+  /* 分類 emoji：維持原本色彩，不做任何濾鏡調整 */
+  .category-emoji-mono {}
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -702,14 +705,16 @@ const CATEGORY_DISPLAY_MODE_OPTIONS = [
   { key: "text_icon", label: "文字+圖案" },
 ];
 const DEFAULT_CATEGORY_DISPLAY_MODES = { detail_view: "text", detail_edit: "text", list: "text" };
-// 依顯示模式組出「類別」欄位要印的文字：文字/圖案(emoji)/文字+圖案
-function renderCategoryText(displayModes, context, primaryCategory) {
+// 依顯示模式組出「類別」欄位要印的文字：文字/圖案(emoji)/文字+圖案。
+// emojiOverride 是使用者自訂的分類圖示覆蓋值（沒改過的分類會自動退回內建預設 CATEGORY_EMOJI）。
+// emoji 一律用灰階濾鏡呈現（方案 A：保留使用者可自訂 emoji 的彈性，同時視覺上簡約一點，不是彩色）
+function renderCategoryText(displayModes, context, primaryCategory, emojiOverride) {
   if (!primaryCategory) return "—";
   const mode = (displayModes && displayModes[context]) || "text";
   const label = AI_CATEGORY_LABELS[primaryCategory];
-  const emoji = CATEGORY_EMOJI[primaryCategory];
-  if (mode === "icon") return emoji;
-  if (mode === "text_icon") return `${emoji} ${label}`;
+  const emoji = (emojiOverride && emojiOverride[primaryCategory]) || CATEGORY_EMOJI[primaryCategory];
+  if (mode === "icon") return <span className="category-emoji-mono">{emoji}</span>;
+  if (mode === "text_icon") return <><span className="category-emoji-mono">{emoji}</span> {label}</>;
   return label;
 }
 
@@ -1402,7 +1407,7 @@ function newDraftItem(content, extra) {
   return { _key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, estimated_minutes: null, requires_travel: false, wait_days_after: 0, from_ai: false, ...extra };
 }
 
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [contentOpen, setContentOpen] = useState(false); // 任務內容預設收合，因為有 checklist 可以承載細節，不強迫填文字
@@ -1587,7 +1592,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 
           <div>
             <div className="flex items-center gap-1.5">
-              <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{aiCategoryScores ? renderCategoryText(categoryDisplay, "detail_edit", primaryCategoryOf(aiCategoryScores)) : "尚未分類"}</label>
+              <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{aiCategoryScores ? renderCategoryText(categoryDisplay, "detail_edit", primaryCategoryOf(aiCategoryScores), categoryEmojiOverride) : "尚未分類"}</label>
               <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                 className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
                 <Icon.Search className="w-3.5 h-3.5" />
@@ -1809,7 +1814,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, isStarred, onStar, onUnstar, onDelete, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, isStarred, onStar, onUnstar, onDelete, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2301,7 +2306,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <div className="text-xs text-slate-500 mb-3">
               <div className="flex items-center gap-1.5">
-                <span>任務類別：{mission.primary_category ? renderCategoryText(categoryDisplay, "detail_view", mission.primary_category) : "尚未分類"}</span>
+                <span>任務類別：{mission.primary_category ? renderCategoryText(categoryDisplay, "detail_view", mission.primary_category, categoryEmojiOverride) : "尚未分類"}</span>
                 <button onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                   className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
                   <Icon.Search className="w-3.5 h-3.5" />
@@ -2396,7 +2401,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div className="flex items-center gap-1.5">
                 <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{(() => {
                   const p = aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category;
-                  return p ? renderCategoryText(categoryDisplay, "detail_edit", p) : "尚未分類";
+                  return p ? renderCategoryText(categoryDisplay, "detail_edit", p, categoryEmojiOverride) : "尚未分類";
                 })()}</label>
                 <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                   className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
@@ -2860,7 +2865,7 @@ const COLUMN_LABELS = {
   checklist_progress: "檢查清單進度", category_score: "類別分數", source: "來源", category: "類別",
 };
 
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode, showCategoryColumns, categoryKey, projectNameById, categoryDisplay }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode, showCategoryColumns, categoryKey, projectNameById, categoryDisplay, categoryEmojiOverride }) {
   const isClosedMode = columnMode === "closed";
   const columnDefs = isClosedMode ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
   const vc = visibleColumns || (isClosedMode ? DEFAULT_VISIBLE_COLUMNS_CLOSED : DEFAULT_VISIBLE_COLUMNS);
@@ -2936,7 +2941,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
           : noProgressText(m.updated_at, m.status),
         "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle
       );
-      case "category": return td(key, renderCategoryText(categoryDisplay, "list", m.primary_category), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
+      case "category": return td(key, renderCategoryText(categoryDisplay, "list", m.primary_category, categoryEmojiOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "title": return td(key, m.title, "px-4 py-3 font-medium", null, rowStarStyle);
       case "category_score": return td(key,
         m.category_scores ? (Number(m.category_scores[categoryKey]) || 0).toFixed(2) : "—",
@@ -3313,21 +3318,65 @@ function SettingsView({ profile, onProfileChange }) {
   const [savingPriority, setSavingPriority] = useState(false);
 
   const categoryDisplay = profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES;
+  const categoryEmojiOverride = profile.category_emoji_override || {};
   const [editingCategoryDisplay, setEditingCategoryDisplay] = useState(false);
   const [categoryDisplayDraft, setCategoryDisplayDraft] = useState(categoryDisplay);
+  const [categoryEmojiDraft, setCategoryEmojiDraft] = useState(
+    Object.fromEntries(AI_CATEGORIES.map(k => [k, categoryEmojiOverride[k] || CATEGORY_EMOJI[k]]))
+  );
   const [savingCategoryDisplay, setSavingCategoryDisplay] = useState(false);
+  const [invalidEmojiNotice, setInvalidEmojiNotice] = useState(null); // 存檔時被棄置成預設值的分類清單，存完跳彈窗提醒
 
   function startEditCategoryDisplay() {
     setCategoryDisplayDraft(categoryDisplay);
+    setCategoryEmojiDraft(Object.fromEntries(AI_CATEGORIES.map(k => [k, categoryEmojiOverride[k] || CATEGORY_EMOJI[k]])));
     setEditingCategoryDisplay(true);
+  }
+  // 判斷輸入是不是「剛好一個視覺字元」（grapheme cluster）：emoji 常常是好幾個 code unit 組成
+  // （帶膚色/多人組合的 emoji 甚至到 10 個以上），不能用字串長度去算，要照使用者眼睛看到的「一個字」判斷，
+  // 不然合法的複雜 emoji 會被誤判成太長而擋下來
+  function isSingleGrapheme(str) {
+    if (!str) return false;
+    try {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+      return Array.from(segmenter.segment(str)).length === 1;
+    } catch {
+      // 舊瀏覽器沒有 Intl.Segmenter 時的退路，多數 emoji 仍可正確判斷
+      return Array.from(str).length === 1;
+    }
   }
   async function saveCategoryDisplay() {
     setSavingCategoryDisplay(true);
-    const { error } = await sb.from("profiles").update({ category_display: categoryDisplayDraft }).eq("id", profile.id);
+    const invalidKeys = [];
+    const nextOverride = {};
+    AI_CATEGORIES.forEach(k => {
+      const val = (categoryEmojiDraft[k] || "").trim();
+      if (val === CATEGORY_EMOJI[k]) return; // 跟預設一樣，不用存
+      if (isSingleGrapheme(val)) {
+        nextOverride[k] = val;
+      } else {
+        invalidKeys.push(k); // 不合格（空白／貼了純文字／貼了不只一個 emoji）：直接棄置回預設值
+      }
+    });
+    const { error } = await sb.from("profiles").update({
+      category_display: categoryDisplayDraft, category_emoji_override: nextOverride,
+    }).eq("id", profile.id);
     setSavingCategoryDisplay(false);
     if (!error) {
-      onProfileChange({ ...profile, category_display: categoryDisplayDraft });
+      onProfileChange({ ...profile, category_display: categoryDisplayDraft, category_emoji_override: nextOverride });
       setEditingCategoryDisplay(false);
+      if (invalidKeys.length > 0) setInvalidEmojiNotice(invalidKeys.map(k => AI_CATEGORY_LABELS[k]).join("、"));
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
+  async function resetCategoryEmoji() {
+    setSavingCategoryDisplay(true);
+    const { error } = await sb.from("profiles").update({ category_emoji_override: {} }).eq("id", profile.id);
+    setSavingCategoryDisplay(false);
+    if (!error) {
+      onProfileChange({ ...profile, category_emoji_override: {} });
+      setCategoryEmojiDraft(Object.fromEntries(AI_CATEGORIES.map(k => [k, CATEGORY_EMOJI[k]])));
     } else {
       setMsg({ type: "err", text: error.message });
     }
@@ -3928,6 +3977,31 @@ function SettingsView({ profile, onProfileChange }) {
             </div>
             <p className="text-xs text-slate-500 mb-1">目前任務分類共有十種類別：</p>
             <p className="text-xs text-slate-500 mb-3">{AI_CATEGORIES.map(k => AI_CATEGORY_LABELS[k]).join("、")}</p>
+
+            <div className="mb-3">
+              <div className="flex justify-between items-center mb-2">
+                <p className="text-xs text-slate-500">分類圖案（可自訂 emoji，每格限填一個）</p>
+                {editingCategoryDisplay && (
+                  <button onClick={resetCategoryEmoji} disabled={savingCategoryDisplay} className="text-xs bg-rose-50 text-rose-600 rounded-lg px-2.5 py-1 disabled:opacity-50">還原預設圖案</button>
+                )}
+              </div>
+              <div className="grid grid-cols-5 gap-2">
+                {AI_CATEGORIES.map(k => (
+                  <label key={k} className="flex flex-col items-center gap-1">
+                    {editingCategoryDisplay ? (
+                      <input value={categoryEmojiDraft[k] || ""} onChange={e => setCategoryEmojiDraft({ ...categoryEmojiDraft, [k]: e.target.value })}
+                        className="w-full text-center border border-slate-300 rounded-lg py-1.5 bg-white category-emoji-mono" style={{ fontSize: "1.25rem" }} />
+                    ) : (
+                      <div className="w-full text-center bg-white rounded-lg py-1.5 category-emoji-mono" style={{ fontSize: "1.25rem" }}>
+                        {categoryEmojiOverride[k] || CATEGORY_EMOJI[k]}
+                      </div>
+                    )}
+                    <span className="text-[10px] text-slate-400">{AI_CATEGORY_LABELS[k]}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <p className="text-xs text-slate-500 mb-3">使用標題 AI 功能會自動對任務進行分類偵測，或者亦可用手動添加（只有建立者能填寫類別）。</p>
             <div className="space-y-2">
               {DISPLAY_CONTEXTS.map(ctx => (
@@ -3944,6 +4018,7 @@ function SettingsView({ profile, onProfileChange }) {
                 </div>
               ))}
             </div>
+
             {editingCategoryDisplay && (
               <div className="flex gap-2 mt-3">
                 <button onClick={saveCategoryDisplay} disabled={savingCategoryDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingCategoryDisplay ? "儲存中…" : "儲存"}</button>
@@ -3953,6 +4028,16 @@ function SettingsView({ profile, onProfileChange }) {
           </div>
         </div>
       </div>
+
+      {invalidEmojiNotice && (
+        <ConfirmModal
+          title="部分圖案格式不符，已還原預設"
+          message={`「${invalidEmojiNotice}」這幾個分類的輸入內容不是單一個圖案（可能是空白、一般文字，或貼了不只一個 emoji），已自動改回預設圖案，其餘有效的修改都已正常儲存。`}
+          confirmLabel="知道了" hideCancel
+          onConfirm={() => setInvalidEmojiNotice(null)}
+          onCancel={() => setInvalidEmojiNotice(null)}
+        />
+      )}
 
       <div className="grid md:grid-cols-2 gap-4 mt-4 mb-4">
         <div className="bg-white rounded-2xl shadow p-5">
@@ -4507,7 +4592,7 @@ function ViewModeToggle({ mode, onChange }) {
 // =====================================================================
 // 類別瀏覽：十個分類的方格卡片首頁 + 點進去的分類詳情列表
 // =====================================================================
-function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, onToggleShowAll }) {
+function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, onToggleShowAll, emojiOverride }) {
   // 每個分類先算個粗略數量給卡片參考（用預設 0.5 門檻，跟詳情頁預設值一致，純粹給使用者一個大概印象）
   const relevant = missions.filter(m => m.category_scores && (showAll || isRelevantToUser(m, currentUserId)));
   const counts = {};
@@ -4521,7 +4606,7 @@ function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, on
           <button key={key} onClick={() => onOpenCategory(key)}
             className="flex flex-col items-center justify-center gap-2 rounded-2xl py-8 hover:opacity-90 transition"
             style={{ background: `${CATEGORY_CARD_COLOR[key]}1a`, border: `1px solid ${CATEGORY_CARD_COLOR[key]}40` }}>
-            <span style={{ fontSize: "5rem", lineHeight: 1 }}>{CATEGORY_EMOJI[key]}</span>
+            <span className="category-emoji-mono" style={{ fontSize: "5rem", lineHeight: 1 }}>{(emojiOverride && emojiOverride[key]) || CATEGORY_EMOJI[key]}</span>
             <span className="text-sm font-semibold" style={{ color: CATEGORY_CARD_COLOR[key] }}>{AI_CATEGORY_LABELS[key]}</span>
             <span className="text-xs text-slate-400">{counts[key]} 項</span>
           </button>
@@ -4571,6 +4656,7 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
     noProgressColorOverride: profile.no_progress_color_override, noProgressSeverityDays: profile.no_progress_severity_days,
     checklistDisplayMode: profile.checklist_display_mode,
     categoryDisplay: profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES,
+    categoryEmojiOverride: profile.category_emoji_override,
     sortMode, sortHighlightColor: profile.sort_highlight_color, forceShowSortColumn: profile.force_show_sort_column,
     showCategoryColumns: true, categoryKey, projectNameById,
   };
@@ -4584,7 +4670,7 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
         </button>
       </div>
       <div className="flex items-center gap-3 mb-4">
-        <span style={{ fontSize: "2rem" }}>{CATEGORY_EMOJI[categoryKey]}</span>
+        <span className="category-emoji-mono" style={{ fontSize: "2rem" }}>{(profile.category_emoji_override && profile.category_emoji_override[categoryKey]) || CATEGORY_EMOJI[categoryKey]}</span>
         <h2 className="text-xl font-bold" style={{ color: CATEGORY_CARD_COLOR[categoryKey] }}>{AI_CATEGORY_LABELS[categoryKey]}</h2>
         <span className="text-xs text-slate-400">共 {relevant.length} 項</span>
       </div>
@@ -5342,32 +5428,32 @@ function Dashboard({ session, profile, setProfile }) {
             {starredMissions.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{starredMissions.length}）</h3>
-                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
           </div>
@@ -5536,25 +5622,25 @@ function Dashboard({ session, profile, setProfile }) {
                 {projectStarredMissions.length > 0 && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{projectStarredMissions.length}）</h3>
-                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} />
+                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
               </>
@@ -5591,7 +5677,7 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "category" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4">
             {openCategoryKey === null ? (
-              <CategoryGridPage missions={visibleMissions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} />
+              <CategoryGridPage missions={visibleMissions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} emojiOverride={profile.category_emoji_override} />
             ) : (
               <CategoryDetailPage
                 categoryKey={openCategoryKey} missions={visibleMissions} currentUserId={profile.id} profile={profile}
@@ -5665,7 +5751,7 @@ function Dashboard({ session, profile, setProfile }) {
           priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display}
           priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override}
           currentUserId={profile.id} currentUserName={profile.display_name}
-          fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES}
+          fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override}
           projectId={tab === "project" ? openProjectId : null}
           assigneeOptions={tab === "project" ? currentProjectMembers.filter(m => m.id !== profile.id) : friendProfiles}
         />
@@ -5706,7 +5792,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override}
           isStarred={starredSet.has(openMissionId)} onStar={starMission} onUnstar={unstarMission} onDelete={deleteMission}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
