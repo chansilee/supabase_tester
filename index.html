@@ -5069,7 +5069,7 @@ function Dashboard({ session, profile, setProfile }) {
     return () => { cancelled = true; };
   }, [globalAppliedSearch]);
   const globalSearchedMissions = globalAppliedSearch
-    ? missions.filter(m => {
+    ? visibleMissions.filter(m => {
         const q = globalAppliedSearch.toLowerCase();
         return (m.title || "").toLowerCase().includes(q)
           || (m.content || "").toLowerCase().includes(q)
@@ -5507,10 +5507,10 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "category" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4">
             {openCategoryKey === null ? (
-              <CategoryGridPage missions={missions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} />
+              <CategoryGridPage missions={visibleMissions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} />
             ) : (
               <CategoryDetailPage
-                categoryKey={openCategoryKey} missions={missions} currentUserId={profile.id} profile={profile}
+                categoryKey={openCategoryKey} missions={visibleMissions} currentUserId={profile.id} profile={profile}
                 visibleColumns={visibleColumns} visibleColumnsClosed={visibleColumnsClosed} visibleSections={visibleSections}
                 onOpen={setOpenMissionId} onBack={() => setOpenCategoryKey(null)}
                 projectNameById={projectNameById}
