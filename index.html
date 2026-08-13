@@ -4424,24 +4424,30 @@ function ViewModeToggle({ mode, onChange }) {
 // =====================================================================
 // 類別瀏覽：十個分類的方格卡片首頁 + 點進去的分類詳情列表
 // =====================================================================
-function CategoryGridPage({ missions, currentUserId, onOpenCategory }) {
+function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, onToggleShowAll }) {
   // 每個分類先算個粗略數量給卡片參考（用預設 0.5 門檻，跟詳情頁預設值一致，純粹給使用者一個大概印象）
-  const relevant = missions.filter(m => m.category_scores && isRelevantToUser(m, currentUserId));
+  const relevant = missions.filter(m => m.category_scores && (showAll || isRelevantToUser(m, currentUserId)));
   const counts = {};
   AI_CATEGORIES.forEach(k => {
     counts[k] = relevant.filter(m => (Number(m.category_scores[k]) || 0) >= 0.5).length;
   });
   return (
-    <div className="grid grid-cols-5 gap-4">
-      {AI_CATEGORIES.map(key => (
-        <button key={key} onClick={() => onOpenCategory(key)}
-          className="flex flex-col items-center justify-center gap-2 rounded-2xl py-8 hover:opacity-90 transition"
-          style={{ background: `${CATEGORY_CARD_COLOR[key]}1a`, border: `1px solid ${CATEGORY_CARD_COLOR[key]}40` }}>
-          <span style={{ fontSize: "5rem", lineHeight: 1 }}>{CATEGORY_EMOJI[key]}</span>
-          <span className="text-sm font-semibold" style={{ color: CATEGORY_CARD_COLOR[key] }}>{AI_CATEGORY_LABELS[key]}</span>
-          <span className="text-xs text-slate-400">{counts[key]} 項</span>
-        </button>
-      ))}
+    <div>
+      <div className="grid grid-cols-5 gap-4">
+        {AI_CATEGORIES.map(key => (
+          <button key={key} onClick={() => onOpenCategory(key)}
+            className="flex flex-col items-center justify-center gap-2 rounded-2xl py-8 hover:opacity-90 transition"
+            style={{ background: `${CATEGORY_CARD_COLOR[key]}1a`, border: `1px solid ${CATEGORY_CARD_COLOR[key]}40` }}>
+            <span style={{ fontSize: "5rem", lineHeight: 1 }}>{CATEGORY_EMOJI[key]}</span>
+            <span className="text-sm font-semibold" style={{ color: CATEGORY_CARD_COLOR[key] }}>{AI_CATEGORY_LABELS[key]}</span>
+            <span className="text-xs text-slate-400">{counts[key]} 項</span>
+          </button>
+        ))}
+      </div>
+      <label className="flex items-center justify-center gap-2 text-xs text-slate-500 mt-4">
+        <input type="checkbox" checked={showAll} onChange={e => onToggleShowAll(e.target.checked)} className="w-4 h-4" />
+        顯示與我無關之任務
+      </label>
     </div>
   );
 }
@@ -4449,12 +4455,12 @@ function CategoryGridPage({ missions, currentUserId, onOpenCategory }) {
 const CATEGORY_SORT_MODES = { category_first: "類別分數優先", ...SORT_MODE_LABELS };
 
 function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, visibleColumns, visibleColumnsClosed, visibleSections, onOpen, onBack,
-  projectNameById, hiddenSet, onHide, onUnhide, onDelete, starredSet, onStar, onUnstar, onOpenColumnSettings }) {
+  projectNameById, hiddenSet, onHide, onUnhide, onDelete, starredSet, onStar, onUnstar, onOpenColumnSettings, showAll }) {
   const [threshold, setThreshold] = useState(0.5);
   const [sortMode, setSortMode] = useState("category_first");
   const weights = profile.priority_weights;
 
-  const relevant = missions.filter(m => m.category_scores && isRelevantToUser(m, currentUserId)
+  const relevant = missions.filter(m => m.category_scores && (showAll || isRelevantToUser(m, currentUserId))
     && (Number(m.category_scores[categoryKey]) || 0) >= threshold);
   // 不管選哪一種排序模式，都要照「顯示區塊設定」分成未結案/已完成/已棄置三段——這點要跟個人任務/專案任務
   // 頁面的行為一致：排序模式只決定「段落內」的順序，不是決定要不要分段。之前只有「類別分數優先」有分段，
@@ -4528,6 +4534,37 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
           />
         </div>
       ))}
+    </div>
+  );
+}
+
+// =====================================================================
+// 全域搜尋：極簡列表（任務名稱／任務狀態／來源），不分區塊、不接顯示欄位設定，
+// 目的是快速找到任務點進去看細節，不是拿來比較排序用的，所以刻意不列太多欄位
+// =====================================================================
+function GlobalSearchList({ missions, onOpen, projectNameById, hasSearched }) {
+  if (!hasSearched) return <p className="text-sm text-slate-400 text-center py-6">＜未輸入搜尋條件＞</p>;
+  if (missions.length === 0) return <p className="text-sm text-slate-400 text-center py-6">＜沒有符合的任務＞</p>;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-slate-500 text-xs">
+          <tr>
+            <th className="px-4 py-2 text-left font-medium">任務名稱</th>
+            <th className="px-4 py-2 text-left font-medium">任務狀態</th>
+            <th className="px-4 py-2 text-left font-medium">來源</th>
+          </tr>
+        </thead>
+        <tbody>
+          {missions.map(m => (
+            <tr key={m.id} onClick={() => onOpen(m.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
+              <td className="px-4 py-2.5">{m.title}</td>
+              <td className="px-4 py-2.5 text-slate-500">{STATUS_LABEL[m.status] || m.status}</td>
+              <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{m.project_id ? (projectNameById?.[m.project_id] || "專案任務") : "個人任務"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -4718,6 +4755,10 @@ function Dashboard({ session, profile, setProfile }) {
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [searchMatchedUpdateMissionIds, setSearchMatchedUpdateMissionIds] = useState([]);
+  // 全域搜尋：獨立一份搜尋狀態，不跟個人任務的搜尋框共用（範圍不同，共用容易搞混）
+  const [globalSearchInput, setGlobalSearchInput] = useState("");
+  const [globalAppliedSearch, setGlobalAppliedSearch] = useState("");
+  const [globalSearchMatchedUpdateMissionIds, setGlobalSearchMatchedUpdateMissionIds] = useState([]);
   const [sortMode, setSortMode] = useState(() => (
     profile.remember_sort_mode && profile.remember_sort_mode !== "last_used"
       ? profile.remember_sort_mode
@@ -4739,6 +4780,7 @@ function Dashboard({ session, profile, setProfile }) {
   const searchBoxStyle = (appliedSearch && searchColorEntry) ? { background: `rgba(${hexToRgbString(searchColorEntry.hex)},0.15)` } : undefined;
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
   const [openCategoryKey, setOpenCategoryKey] = useState(null); // null=十宮格首頁；有值=該分類的詳情列表
+  const [categoryShowAll, setCategoryShowAll] = useState(false); // 類別瀏覽「顯示與我無關之任務」開關，預設關閉、不持久化（跟門檻滑桿一樣是當次瀏覽的臨時決定）
   const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
   const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
   const [hiddenIds, setHiddenIds] = useState([]);
@@ -5013,6 +5055,30 @@ function Dashboard({ session, profile, setProfile }) {
     return () => { cancelled = true; };
   }, [appliedSearch]);
 
+  // 全域搜尋：範圍是整個 missions（RLS 本來就只回傳看得到的：個人 + 所有有份的專案任務，
+  // 不分指派關係），不用像個人任務那樣再篩一次 relationFilter
+  function runGlobalSearch() { setGlobalAppliedSearch(globalSearchInput.trim()); }
+  function clearGlobalSearch() { setGlobalSearchInput(""); setGlobalAppliedSearch(""); }
+  useEffect(() => {
+    if (!globalAppliedSearch.trim()) { setGlobalSearchMatchedUpdateMissionIds([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await sb.from("mission_updates").select("mission_id").ilike("content", `%${globalAppliedSearch}%`);
+      if (!cancelled) setGlobalSearchMatchedUpdateMissionIds((data || []).map(r => r.mission_id));
+    })();
+    return () => { cancelled = true; };
+  }, [globalAppliedSearch]);
+  const globalSearchedMissions = globalAppliedSearch
+    ? missions.filter(m => {
+        const q = globalAppliedSearch.toLowerCase();
+        return (m.title || "").toLowerCase().includes(q)
+          || (m.content || "").toLowerCase().includes(q)
+          || (m.final_comment || "").toLowerCase().includes(q)
+          || globalSearchMatchedUpdateMissionIds.includes(m.id);
+      })
+    : [];
+  const globalSortedMissions = sortMissions(globalSearchedMissions, sortMode, profile.priority_weights);
+
   async function toggleColumn(key) {
     const updated = { ...visibleColumns, [key]: !visibleColumns[key] };
     setVisibleColumns(updated);
@@ -5056,7 +5122,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","個人任務"],["project","專案任務"],["category","類別瀏覽"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","個人任務"],["project","專案任務"],["category","類別瀏覽"],["globalSearch","全域搜尋"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -5441,7 +5507,7 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "category" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4">
             {openCategoryKey === null ? (
-              <CategoryGridPage missions={missions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} />
+              <CategoryGridPage missions={missions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} />
             ) : (
               <CategoryDetailPage
                 categoryKey={openCategoryKey} missions={missions} currentUserId={profile.id} profile={profile}
@@ -5451,9 +5517,57 @@ function Dashboard({ session, profile, setProfile }) {
                 hiddenSet={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission}
                 starredSet={starredSet} onStar={starMission} onUnstar={unstarMission}
                 onOpenColumnSettings={() => setColumnSettingsContext("category")}
+                showAll={categoryShowAll}
               />
             )}
           </div>
+        )}
+
+        {tab === "globalSearch" && (
+          <>
+            <div className="bg-white rounded-2xl shadow p-4 mb-4">
+              <div className="flex gap-2">
+                <input value={globalSearchInput} onChange={e => setGlobalSearchInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && runGlobalSearch()}
+                  placeholder="全域搜尋任務標題或內文（包括：個人任務/專案任務）…"
+                  className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <button onClick={runGlobalSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
+                  <Icon.Search className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
+                <p className="text-xs text-slate-500">
+                  {globalAppliedSearch && (
+                    <>
+                      {`目前顯示是標題、內文、最終評論或更新紀錄留言含有「${globalAppliedSearch}」的搜尋結果，共 ${globalSortedMissions.length} 筆`}
+                      <button onClick={clearGlobalSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>
+                    </>
+                  )}
+                </p>
+                <div className="flex gap-1 text-xs flex-wrap">
+                  <button onClick={() => chooseSortMode(setSortMode, "created_desc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "due_asc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "due_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>截止時間排序</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "priority_desc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>優先級分數排序</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "priority_first")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "priority_first" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>重要性優先</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "scale_asc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_asc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>小任務優先</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "scale_desc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "scale_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>大任務優先</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "procrastination_desc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "procrastination_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>拖延優先</button>
+                  <button onClick={() => chooseSortMode(setSortMode, "updated_desc")}
+                    className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl shadow p-4 mb-4">
+              <GlobalSearchList missions={globalSortedMissions} onOpen={setOpenMissionId} projectNameById={projectNameById} hasSearched={!!globalAppliedSearch} />
+            </div>
+          </>
         )}
 
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
