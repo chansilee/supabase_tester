@@ -2313,26 +2313,30 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 : `誰可以看：${[mission.creator?.display_name, mission.assignee?.display_name].filter((v, i, a) => v && a.indexOf(v) === i).join("、")}`}
             </div>
             {(!isClosed || isCreator) && (
-              <div className="flex items-center justify-end gap-3 mb-2">
+              <div className="flex items-center justify-end gap-2 mb-2">
                 {!isClosed && (
                   isStarred ? (
-                    <button onClick={() => onUnstar(missionId)} title="取消關注" className="flex items-center justify-center text-pin-inactive">
-                      <Icon.Unboost className="w-6 h-6" />
+                    <button onClick={() => onUnstar(missionId)} title="取消關注"
+                      className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-pin-inactive rounded-lg w-9 h-9">
+                      <Icon.Unboost className="w-4 h-4" />
                     </button>
                   ) : (
-                    <button onClick={() => onStar(missionId)} title="注目任務" className="flex items-center justify-center text-pin-active">
-                      <Icon.Boost className="w-6 h-6" />
+                    <button onClick={() => onStar(missionId)} title="注目任務"
+                      className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-pin-active rounded-lg w-9 h-9">
+                      <Icon.Boost className="w-4 h-4" />
                     </button>
                   )
                 )}
                 {isCreator && !isClosed && (
-                  <button onClick={() => setEditingBody(true)} title="編輯本文" className="flex items-center justify-center text-slate-500 hover:text-slate-600">
-                    <Icon.Edit className="w-6 h-6" />
+                  <button onClick={() => setEditingBody(true)} title="編輯本文"
+                    className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg w-9 h-9">
+                    <Icon.Edit className="w-4 h-4" />
                   </button>
                 )}
                 {isCreator && (
-                  <button onClick={() => setConfirmDeleteMission(true)} title="永久刪除任務" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                    <Icon.Trash className="w-6 h-6" />
+                  <button onClick={() => setConfirmDeleteMission(true)} title="永久刪除任務"
+                    className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9">
+                    <Icon.Trash className="w-4 h-4" />
                   </button>
                 )}
               </div>
