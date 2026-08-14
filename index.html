@@ -343,6 +343,8 @@ table { border-collapse: collapse; width: 100%; }
 .rounded-md { border-radius: 0.375rem; }
 .rounded-lg { border-radius: 0.5rem; }
 .rounded-xl { border-radius: 0.75rem; }
+.rounded-t-xl { border-top-left-radius: 0.75rem; border-top-right-radius: 0.75rem; }
+.rounded-b-xl { border-bottom-left-radius: 0.75rem; border-bottom-right-radius: 0.75rem; }
 .rounded-2xl { border-radius: 1rem; }
 .rounded-full { border-radius: 9999px; }
 .shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); }
@@ -352,6 +354,7 @@ table { border-collapse: collapse; width: 100%; }
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
 .inline-block { display: inline-block; }
+.block { display: block; }
 .grid { display: grid; }
 .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid-cols-7 { grid-template-columns: repeat(7, minmax(0, 1fr)); }
@@ -805,10 +808,17 @@ function renderScaleText(labels, displayModes, context, n, colorOverride) {
 }
 
 // 緊急程度分數：依剩餘天數 x 與規模 s 計算（規格見 urgency-score-spec.md）
+// 「提前緊張加成」：一個全域可調的乘數，讓緊急度分數提前反映——不是真的改截止時間，
+// 只是在算分數曲線時把「剩餘天數」除以這個倍數，等效於提早進入緊張區間。
+// 用模組層級變數而不是逐層傳參數，是因為 urgencyScore 被全站幾十個地方呼叫（排序、列表、
+// 甘特圖、任務內頁…），逐一改函式簽章風險太高；改用這個變數，只要在 App render 當下同步設好，
+// 之後同一輪 render 裡所有子元件呼叫 urgencyScore 就都會用到最新值，不會有時序落差的問題。
+let URGENCY_ANTICIPATION_MULTIPLIER = 1;
 function urgencyScore(x, s) {
-  if (x <= 0) return 2;
-  if (x >= s) return s / x;
-  return (-1 / s) * x + 2;
+  const ex = x / URGENCY_ANTICIPATION_MULTIPLIER;
+  if (ex <= 0) return 2;
+  if (ex >= s) return s / ex;
+  return (-1 / s) * ex + 2;
 }
 function remainingDays(dueDate) {
   if (!dueDate) return null;
@@ -3133,7 +3143,7 @@ function GanttView({ missions, onOpen }) {
 // =====================================================================
 // 緊急程度分數曲線（互動預覽，邏輯對應 urgency-score-spec.md）
 // =====================================================================
-function UrgencyCurveChart({ scaleLabels }) {
+function UrgencyCurveChart({ scaleLabels, multiplier, onMultiplierChange }) {
   const [s, setS] = useState(1);
   const [hover, setHover] = useState(null); // { x, y, cx, cy }
 
@@ -3179,38 +3189,51 @@ function UrgencyCurveChart({ scaleLabels }) {
           </button>
         ))}
       </div>
-      <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-xl" style={{ background: "#0f1720" }}>
-          {gridXs.map(gx => (
-            <line key={"gx" + gx} x1={sx(gx)} y1={sy(yMin)} x2={sx(gx)} y2={sy(yMax)} stroke="#27394a" strokeWidth="1" />
-          ))}
-          {gridYs.map(gy => (
-            <line key={"gy" + gy} x1={sx(xMin)} y1={sy(gy)} x2={sx(xMax)} y2={sy(gy)} stroke="#27394a" strokeWidth="1" />
-          ))}
-          <line x1={sx(0)} y1={sy(yMin)} x2={sx(0)} y2={sy(yMax)} stroke="#5c7488" strokeWidth="2.5" />
-          <line x1={sx(xMin)} y1={sy(0)} x2={sx(xMax)} y2={sy(0)} stroke="#5c7488" strokeWidth="2.5" />
-          {gridXs.map(gx => (
-            <text key={"tx" + gx} x={sx(gx)} y={sy(0) + 18} textAnchor="middle" fontSize="11" fill="#93a4b3">{gx}</text>
-          ))}
-          {gridYs.filter(gy => gy !== 0).map(gy => (
-            <text key={"ty" + gy} x={sx(0) - 10} y={sy(gy) + 4} textAnchor="end" fontSize="11" fill="#93a4b3">{gy}</text>
-          ))}
-          <text x={sx(xMax) - 4} y={sy(0) - 12} textAnchor="end" fontSize="13" fontWeight="700" fill="#e8eef3">剩餘時間(天)</text>
-          <text x={sx(0) + 10} y={sy(yMax) + 16} textAnchor="start" fontSize="13" fontWeight="700" fill="#e8eef3">緊急程度分數</text>
-          <path d={d} fill="none" stroke="#4fd1c5" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-          {markers.map((m, i) => (
-            <circle key={i} cx={m.cx} cy={m.cy} r={hover && hover.x === m.x ? 6 : 4.5}
-              fill={hover && hover.x === m.x ? "#f2a541" : "#16212c"} stroke="#f2a541" strokeWidth="2"
-              style={{ cursor: "pointer" }}
-              onMouseEnter={() => setHover(m)} onMouseLeave={() => setHover(null)} />
-          ))}
-        </svg>
-        {hover && (
-          <div className="absolute bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg pointer-events-none"
-            style={{ left: (hover.cx / W) * 100 + "%", top: (hover.cy / H) * 100 + "%", transform: "translate(-50%, -120%)" }}>
-            剩餘天數：{hover.x} 天，緊急分數：{hover.y.toFixed(2)}
-          </div>
-        )}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-xs text-slate-500">提前緊張加成：</span>
+        <select value={multiplier} onChange={e => onMultiplierChange(Number(e.target.value))}
+          className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white">
+          {[1, 2, 3, 4].map(n => <option key={n} value={n}>{`x${n}`}</option>)}
+        </select>
+        <span className="text-xs text-slate-400">（倍數越高，任務條會越早進入「紅色區」以便提醒使用者「提早」完成任務）</span>
+      </div>
+      <div>
+        <div className="relative rounded-t-xl overflow-hidden" style={{ background: "#0f1720" }}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block">
+            {gridXs.map(gx => (
+              <line key={"gx" + gx} x1={sx(gx)} y1={sy(yMin)} x2={sx(gx)} y2={sy(yMax)} stroke="#27394a" strokeWidth="1" />
+            ))}
+            {gridYs.map(gy => (
+              <line key={"gy" + gy} x1={sx(xMin)} y1={sy(gy)} x2={sx(xMax)} y2={sy(gy)} stroke="#27394a" strokeWidth="1" />
+            ))}
+            <line x1={sx(0)} y1={sy(yMin)} x2={sx(0)} y2={sy(yMax)} stroke="#5c7488" strokeWidth="2.5" />
+            <line x1={sx(xMin)} y1={sy(0)} x2={sx(xMax)} y2={sy(0)} stroke="#5c7488" strokeWidth="2.5" />
+            {gridXs.map(gx => (
+              <text key={"tx" + gx} x={sx(gx)} y={sy(0) + 18} textAnchor="middle" fontSize="11" fill="#93a4b3">{gx}</text>
+            ))}
+            {gridYs.filter(gy => gy !== 0).map(gy => (
+              <text key={"ty" + gy} x={sx(0) - 10} y={sy(gy) + 4} textAnchor="end" fontSize="11" fill="#93a4b3">{gy}</text>
+            ))}
+            <text x={sx(xMax) - 4} y={sy(0) - 12} textAnchor="end" fontSize="13" fontWeight="700" fill="#e8eef3">剩餘時間(天)</text>
+            <text x={sx(0) + 10} y={sy(yMax) + 16} textAnchor="start" fontSize="13" fontWeight="700" fill="#e8eef3">緊急程度分數</text>
+            <path d={d} fill="none" stroke="#4fd1c5" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+            {markers.map((m, i) => (
+              <circle key={i} cx={m.cx} cy={m.cy} r={hover && hover.x === m.x ? 6 : 4.5}
+                fill={hover && hover.x === m.x ? "#f2a541" : "#16212c"} stroke="#f2a541" strokeWidth="2"
+                style={{ cursor: "pointer" }}
+                onMouseEnter={() => setHover(m)} onMouseLeave={() => setHover(null)} />
+            ))}
+          </svg>
+          {hover && (
+            <div className="absolute bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg pointer-events-none"
+              style={{ left: (hover.cx / W) * 100 + "%", top: (hover.cy / H) * 100 + "%", transform: "translate(-50%, -120%)" }}>
+              剩餘天數：{hover.x} 天，緊急分數：{hover.y.toFixed(2)}
+            </div>
+          )}
+        </div>
+        <p className="text-center text-[11px] py-2 rounded-b-xl" style={{ color: "#93a4b3", background: "#0f1720", margin: 0 }}>
+          已套用 - 提前緊張加成 x{multiplier}
+        </p>
       </div>
       <p className="text-[11px] text-slate-400 mt-2">滑鼠移到圖上的橘色圓點可以看到該天數對應的精確分數。</p>
     </div>
@@ -3380,6 +3403,14 @@ function SettingsView({ profile, onProfileChange }) {
     } else {
       setMsg({ type: "err", text: error.message });
     }
+  }
+
+  // 提前緊張加成：切下拉選單當下立即持久化，不用編輯/儲存流程，
+  // 存回 profile 後全站用 urgencyScore() 算出來的分數（排序、列表、甘特圖…）都會立刻反映新倍數
+  async function setUrgencyAnticipationMultiplier(val) {
+    const { error } = await sb.from("profiles").update({ urgency_anticipation_multiplier: val }).eq("id", profile.id);
+    if (!error) onProfileChange({ ...profile, urgency_anticipation_multiplier: val });
+    else setMsg({ type: "err", text: error.message });
   }
 
   function startEditPriority() {
@@ -3965,7 +3996,7 @@ function SettingsView({ profile, onProfileChange }) {
             <p className="text-xs text-slate-500 mb-3">緊急程度分數依「剩餘時間」與「任務規模」計算，任務列表的「緊急度」欄位就是用這條曲線即時算出來的。</p>
             <UrgencyCurveChart scaleLabels={{
               S1: scaleLabels.S1?.long, S2: scaleLabels.S2?.long, S3: scaleLabels.S3?.long, S4: scaleLabels.S4?.long, S5: scaleLabels.S5?.long,
-            }} />
+            }} multiplier={profile.urgency_anticipation_multiplier || 1} onMultiplierChange={setUrgencyAnticipationMultiplier} />
           </div>
         </div>
 
@@ -5835,6 +5866,9 @@ function App() {
   if (session === undefined) return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">載入中…</div>;
   if (!session) return <AuthScreen />;
   if (!profile) return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">建立會員資料中…</div>;
+  // 同步設定（不是 useEffect）：確保這一輪 render 裡，Dashboard 底下任何呼叫 urgencyScore 的地方
+  // 都已經拿到最新的倍數，不會有「先用舊值算一次分數、下一輪 render 才更新」的落差
+  URGENCY_ANTICIPATION_MULTIPLIER = profile.urgency_anticipation_multiplier || 1;
   return <Dashboard session={session} profile={profile} setProfile={setProfile} />;
 }
 
