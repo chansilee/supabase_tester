@@ -2279,23 +2279,57 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
-            <span className="ml-2 text-xs text-slate-400">{typeLabel}{mission.project_id ? `（${mission.project?.name}）` : ""}</span>
-            {isCreator && (
-              <button onClick={startSwitch} className="ml-2 inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 hover:bg-slate-200">
-                {mission.project_id ? "切至個人專案" : "切至專案內"}
-              </button>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <div className="px-6 pt-6 pb-3 border-b border-slate-100">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <span className={"inline-block text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[mission.status]}>{STATUS_LABEL[mission.status]}</span>
+              <span className="ml-2 text-xs text-slate-400">{typeLabel}{mission.project_id ? `（${mission.project?.name}）` : ""}</span>
+              {isCreator && (
+                <button onClick={startSwitch} className="ml-2 inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600 hover:bg-slate-200">
+                  {mission.project_id ? "切至個人專案" : "切至專案內"}
+                </button>
+              )}
+            </div>
+            <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold">{mission.title}</h2>
+            {(!isClosed || isCreator) && (
+              <div className="flex items-center gap-2 shrink-0">
+                {!isClosed && (
+                  isStarred ? (
+                    <button onClick={() => onUnstar(missionId)} title="取消關注"
+                      className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-pin-inactive rounded-lg w-9 h-9">
+                      <Icon.Unboost className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button onClick={() => onStar(missionId)} title="注目任務"
+                      className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-pin-active rounded-lg w-9 h-9">
+                      <Icon.Boost className="w-4 h-4" />
+                    </button>
+                  )
+                )}
+                {isCreator && !isClosed && (
+                  <button onClick={() => setEditingBody(true)} title="編輯本文"
+                    className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg w-9 h-9">
+                    <Icon.Edit className="w-4 h-4" />
+                  </button>
+                )}
+                {isCreator && (
+                  <button onClick={() => setConfirmDeleteMission(true)} title="永久刪除任務"
+                    className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9">
+                    <Icon.Trash className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             )}
           </div>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
 
+        <div className="overflow-y-auto flex-1 px-6 pb-6 pt-4">
         {!editingBody ? (
           <div>
-            <h2 className="text-xl font-bold mb-2">{mission.title}</h2>
             {mission.content && <p className="whitespace-pre-wrap text-sm text-slate-700 mb-3">{mission.content}</p>}
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-500 mb-3">
               <div>建立成員：{mission.creator?.display_name}</div>
@@ -2350,35 +2384,6 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 ? `誰可以看：專案「${mission.project?.name}」的所有成員（${projectMembers.map(p => p.display_name).join("、")}）`
                 : `誰可以看：${[mission.creator?.display_name, mission.assignee?.display_name].filter((v, i, a) => v && a.indexOf(v) === i).join("、")}`}
             </div>
-            {(!isClosed || isCreator) && (
-              <div className="flex items-center justify-end gap-2 mb-2">
-                {!isClosed && (
-                  isStarred ? (
-                    <button onClick={() => onUnstar(missionId)} title="取消關注"
-                      className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-pin-inactive rounded-lg w-9 h-9">
-                      <Icon.Unboost className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <button onClick={() => onStar(missionId)} title="注目任務"
-                      className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-pin-active rounded-lg w-9 h-9">
-                      <Icon.Boost className="w-4 h-4" />
-                    </button>
-                  )
-                )}
-                {isCreator && !isClosed && (
-                  <button onClick={() => setEditingBody(true)} title="編輯本文"
-                    className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg w-9 h-9">
-                    <Icon.Edit className="w-4 h-4" />
-                  </button>
-                )}
-                {isCreator && (
-                  <button onClick={() => setConfirmDeleteMission(true)} title="永久刪除任務"
-                    className="flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg w-9 h-9">
-                    <Icon.Trash className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         ) : (
           <div className="space-y-2 mb-3">
@@ -2723,9 +2728,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   {visibleUpdates.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
                   {visibleUpdates.map(u => (
                     <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                      <div className="flex justify-between text-xs text-slate-400 mb-1">
-                        <span>{u.is_system ? "System" : u.author?.display_name}</span>
-                        <span>{fmt(u.created_at)}</span>
+                      <div className="text-xs text-slate-400 mb-1">
+                        {u.is_system ? "System" : u.author?.display_name} ({fmt(u.created_at)})
                       </div>
                       <p className="text-sm whitespace-pre-wrap">
                         {u.is_system
@@ -2825,6 +2829,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
 
