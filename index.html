@@ -1242,12 +1242,13 @@ function preciseDeadlineISO(dateStr, timeStr) {
 // 呼叫 Supabase Edge Function（ai-recognize），Gemini API key 只存在伺服器端，前端絕對拿不到
 // AI 呼叫失敗時，哪些錯誤代碼屬於「額度/頻率限制」，需要用明顯的自繪彈窗告知使用者
 // （其餘技術性錯誤——例如 AI 服務掛了、格式解析失敗——維持原本的行內紅字提示，並附上代碼方便回報給 admin）
-const AI_QUOTA_ERROR_CODES = new Set(["PERSONAL_MINUTE_LIMIT", "PERSONAL_DAILY_LIMIT", "GLOBAL_RATE_LIMIT", "GEMINI_QUOTA_EXCEEDED"]);
+const AI_QUOTA_ERROR_CODES = new Set(["PERSONAL_MINUTE_LIMIT", "PERSONAL_DAILY_LIMIT", "GLOBAL_RATE_LIMIT", "GEMINI_QUOTA_EXCEEDED", "AI_UNAVAILABLE"]);
 const AI_QUOTA_ERROR_TITLES = {
   PERSONAL_MINUTE_LIMIT: "查詢太頻繁了",
   PERSONAL_DAILY_LIMIT: "今日次數已用完",
   GLOBAL_RATE_LIMIT: "系統忙碌中",
   GEMINI_QUOTA_EXCEEDED: "AI 服務額度已用完",
+  AI_UNAVAILABLE: "功能暫時無法使用",
 };
 
 async function callAiRecognize(title) {
@@ -1444,7 +1445,7 @@ function newDraftItem(content, extra) {
   return { _key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, estimated_minutes: null, requires_travel: false, wait_days_after: 0, from_ai: false, ...extra };
 }
 
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride }) {
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, aiBanned }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [contentOpen, setContentOpen] = useState(false); // 任務內容預設收合，因為有 checklist 可以承載細節，不強迫填文字
@@ -1603,7 +1604,8 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             <div className="flex gap-2 mt-1">
               <input required value={title} onChange={e => setTitle(e.target.value)}
                 className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              <button type="button" onClick={runAiRecognize} disabled={aiBusy || !title.trim()}
+              <button type="button" onClick={runAiRecognize} disabled={aiBusy || !title.trim() || aiBanned}
+                title={aiBanned ? "AI 辨識功能目前暫時無法使用" : undefined}
                 className="shrink-0 bg-violet-50 text-violet-700 text-xs rounded-lg px-3 py-2 font-medium disabled:opacity-50 whitespace-nowrap">
                 {aiBusy ? "辨識中…" : "✨ AI 辨識"}
               </button>
@@ -1851,7 +1853,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, isStarred, onStar, onUnstar, onDelete, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2417,8 +2419,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           <div className="space-y-2 mb-3">
             <div className="flex gap-2 items-start">
               <input value={editTitle} onChange={e => setEditTitle(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
-              <button type="button" onClick={rerunAiRecognize} disabled={aiBusy || !editTitle.trim()}
-                title="依目前標題重新辨識截止日期／子任務建議"
+              <button type="button" onClick={rerunAiRecognize} disabled={aiBusy || !editTitle.trim() || aiBanned}
+                title={aiBanned ? "AI 辨識功能目前暫時無法使用" : "依目前標題重新辨識截止日期／子任務建議"}
                 className="shrink-0 bg-violet-50 text-violet-700 text-xs rounded-lg px-3 py-2 font-medium disabled:opacity-50 whitespace-nowrap">
                 {aiBusy ? "辨識中…" : "✨ AI 辨識"}
               </button>
@@ -5191,6 +5193,9 @@ function Dashboard({ session, profile, setProfile }) {
   );
   const visibleProjects = projects.filter(p => p.creator_id === profile.id || myProjectIdSet.has(p.id));
   const projectNameById = Object.fromEntries(projects.map(p => [p.id, p.name]));
+  // AI 辨識功能是否被鎖定：永久鎖定，或暫時鎖定且還沒到期。前端只用來決定要不要讓按鈕反灰，
+  // 不會告訴使用者是哪一種、還剩多久——真實狀態只有 admin.html 看得到
+  const aiBanned = !!(profile.ai_banned_permanently || (profile.ai_banned_until && new Date(profile.ai_banned_until) > new Date()));
 
   // 專案列表自訂排序：有存過順序就照存的來，新增/離開的專案自動補在後面，不會整批失效
   const orderedProjects = (() => {
@@ -5821,6 +5826,7 @@ function Dashboard({ session, profile, setProfile }) {
           priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override}
           currentUserId={profile.id} currentUserName={profile.display_name}
           fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override}
+          aiBanned={aiBanned}
           projectId={tab === "project" ? openProjectId : null}
           assigneeOptions={tab === "project" ? currentProjectMembers.filter(m => m.id !== profile.id) : friendProfiles}
         />
@@ -5861,7 +5867,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} aiBanned={aiBanned}
           isStarred={starredSet.has(openMissionId)} onStar={starMission} onUnstar={unstarMission} onDelete={deleteMission}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}

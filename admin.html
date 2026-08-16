@@ -80,6 +80,7 @@ table { border-collapse: collapse; width: 100%; }
 .text-rose-500 { color: #f43f5e; }
 .bg-rose-600 { background-color: #e11d48; }
 .text-rose-600 { color: #e11d48; }
+.hover\:text-rose-600:hover { color: #e11d48; }
 .bg-rose-700 { background-color: #be123c; }
 .text-rose-700 { color: #be123c; }
 .bg-amber-50 { background-color: #fffbeb; }
@@ -249,6 +250,7 @@ table { border-collapse: collapse; width: 100%; }
 .max-w-md { max-width: 28rem; }
 .max-w-lg { max-width: 32rem; }
 .max-w-2xl { max-width: 42rem; }
+.max-w-5xl { max-width: 64rem; }
 .max-w-6xl { max-width: 72rem; }
 .max-h-56 { max-height: 14rem; }
 .max-h-80 { max-height: 20rem; }
@@ -665,10 +667,160 @@ function UsersTab({ currentUserId }) {
 }
 
 // =====================================================================
+// 使用者 AI 用量分頁
+// =====================================================================
+const AI_DAILY_QUOTA = { free: 10, vip: 100, admin: 500 }; // 跟 Edge Function 裡的常數保持一致，純顯示參考用
+
+function AiUsageTab() {
+  const [rows, setRows] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [savingId, setSavingId] = useState(null);
+  const [confirmLock, setConfirmLock] = useState(null); // { userId, type: "temp" | "permanent", name }
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(async () => {
+    const { data, error } = await sb.rpc("admin_ai_usage_stats");
+    if (error) setErr(error.message);
+    else setRows(data || []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Realtime：任何人的鎖定狀態或 AI 用量紀錄有變動，就重新抓一次
+  useEffect(() => {
+    if (!sb) return;
+    const channel = sb.channel("admin-ai-usage")
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "ai_usage_log" }, () => load())
+      .subscribe();
+    return () => { sb.removeChannel(channel); };
+  }, [load]);
+
+  async function applyLock(userId, type) {
+    setSavingId(userId);
+    const payload = type === "permanent"
+      ? { ai_banned_permanently: true, ai_banned_until: null }
+      : { ai_banned_permanently: false, ai_banned_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() };
+    const { error } = await sb.from("profiles").update(payload).eq("id", userId);
+    setSavingId(null);
+    setConfirmLock(null);
+    if (error) setErr(error.message); else load();
+  }
+  async function unlock(userId) {
+    setSavingId(userId);
+    const { error } = await sb.from("profiles").update({ ai_banned_permanently: false, ai_banned_until: null }).eq("id", userId);
+    setSavingId(null);
+    if (error) setErr(error.message); else load();
+  }
+
+  const filtered = rows.filter(u =>
+    !searchTerm.trim()
+    || (u.display_name || "").toLowerCase().includes(searchTerm.trim().toLowerCase())
+    || (u.email || "").toLowerCase().includes(searchTerm.trim().toLowerCase())
+  );
+
+  return (
+    <div>
+      <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="搜尋姓名或 email…"
+        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-4" />
+
+      {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-3">{err}</div>}
+
+      <div className="bg-white rounded-2xl shadow overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-slate-400 border-b border-slate-200">
+              <th className="px-4 py-2 font-medium">使用者</th>
+              <th className="px-4 py-2 font-medium">會員等級</th>
+              <th className="px-4 py-2 font-medium">今日已用/上限</th>
+              <th className="px-4 py-2 font-medium">近7日成功次數</th>
+              <th className="px-4 py-2 font-medium">近7日被拒次數</th>
+              <th className="px-4 py-2 font-medium">最近觸發時間</th>
+              <th className="px-4 py-2 font-medium">狀態</th>
+              <th className="px-4 py-2 font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(u => {
+              const quota = AI_DAILY_QUOTA[u.member_role] ?? AI_DAILY_QUOTA.free;
+              const isTempBanned = !!u.ai_banned_until && new Date(u.ai_banned_until) > new Date();
+              const isBanned = u.ai_banned_permanently || isTempBanned;
+              // 近7日被拒次數高，或今日用量逼近上限，都值得注意，用顏色標一下
+              const heavyBlocked = u.last7d_blocked >= 10;
+              const nearDailyLimit = u.today_success >= quota;
+              return (
+                <tr key={u.id} className="border-b border-slate-100">
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="font-medium">{u.display_name}</div>
+                    <div className="text-xs text-slate-400">{u.email}</div>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{ROLE_LABEL[u.member_role] || u.member_role}</td>
+                  <td className={"px-4 py-3 whitespace-nowrap " + (nearDailyLimit ? "text-amber-800 font-medium" : "text-slate-500")}>
+                    {u.today_success} / {quota}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{u.last7d_success}</td>
+                  <td className={"px-4 py-3 whitespace-nowrap " + (heavyBlocked ? "text-rose-600 font-medium" : "text-slate-500")}>
+                    {u.last7d_blocked}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">{fmt(u.last_called_at)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {u.ai_banned_permanently ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-rose-100 text-rose-700">永久禁止中</span>
+                    ) : isTempBanned ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-200 text-amber-800">暫時禁止中（至 {fmt(u.ai_banned_until)} 解除）</span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">正常</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex gap-1.5">
+                      {isBanned ? (
+                        <button onClick={() => unlock(u.id)} disabled={savingId === u.id}
+                          className="text-xs bg-emerald-600 text-white rounded-lg px-2.5 py-1 disabled:opacity-50">解鎖</button>
+                      ) : (
+                        <>
+                          <button onClick={() => setConfirmLock({ userId: u.id, type: "temp", name: u.display_name })} disabled={savingId === u.id}
+                            className="text-xs bg-amber-500 text-white rounded-lg px-2.5 py-1 disabled:opacity-50">鎖24小時</button>
+                          <button onClick={() => setConfirmLock({ userId: u.id, type: "permanent", name: u.display_name })} disabled={savingId === u.id}
+                            className="text-xs bg-rose-600 text-white rounded-lg px-2.5 py-1 disabled:opacity-50">永久鎖</button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">找不到符合的使用者</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-400 mt-2">＊這裡不能調整會員等級，請到「使用者總覽」分頁操作。近7日被拒次數包含個人每分鐘/每日上限、全站共用上限、帳號被鎖定期間仍嘗試呼叫，都算在內。</p>
+
+      {confirmLock && (
+        <ConfirmModal
+          title={confirmLock.type === "permanent" ? "永久鎖定 AI 辨識功能" : "暫時鎖定 AI 辨識功能 24 小時"}
+          message={
+            confirmLock.type === "permanent"
+              ? `確定要永久鎖定「${confirmLock.name}」的 AI 辨識功能嗎？之後要恢復需要手動解鎖。使用者端只會看到「功能暫時無法使用」，不會被告知是永久或暫時。`
+              : `確定要暫時鎖定「${confirmLock.name}」的 AI 辨識功能 24 小時嗎？時間到了會自動恢復，也可以隨時手動解鎖。`
+          }
+          confirmLabel={confirmLock.type === "permanent" ? "確定永久鎖定" : "確定鎖定 24 小時"}
+          danger
+          onConfirm={() => applyLock(confirmLock.userId, confirmLock.type)}
+          onCancel={() => setConfirmLock(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
 // 管理後台主畫面（分頁籤：錯誤回報管理 / 使用者總覽）
 // =====================================================================
 function AdminDashboard({ session }) {
-  const [tab, setTab] = useState("reports"); // reports | users
+  const [tab, setTab] = useState("reports"); // reports | users | aiUsage
 
   return (
     <div className="min-h-screen">
@@ -677,7 +829,7 @@ function AdminDashboard({ session }) {
           <div className="flex items-center gap-6">
             <h1 className="font-bold text-lg">管理後台</h1>
             <nav className="flex gap-1">
-              {[["reports", "錯誤回報管理"], ["users", "使用者總覽"]].map(([k, l]) => (
+              {[["reports", "錯誤回報管理"], ["users", "使用者總覽"], ["aiUsage", "使用者AI用量"]].map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)}
                   className={"text-sm px-3 py-1.5 rounded-lg " + (tab === k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>
                   {l}
@@ -694,6 +846,7 @@ function AdminDashboard({ session }) {
       <main className="max-w-5xl mx-auto px-6 py-6">
         {tab === "reports" && <BugReportsTab />}
         {tab === "users" && <UsersTab currentUserId={session.user.id} />}
+        {tab === "aiUsage" && <AiUsageTab />}
       </main>
     </div>
   );
