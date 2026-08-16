@@ -4825,6 +4825,7 @@ const MEMBER_ROLE_LIMITS = {
       "每日新增任務上限：100 筆",
       "可建立專案數：2 個",
       "單一任務下，自己的留言則數上限：10 則",
+      "AI 辨識：每分鐘 1 次、每日 10 次",
     ],
   },
   vip: {
@@ -4838,11 +4839,12 @@ const MEMBER_ROLE_LIMITS = {
       "每日新增任務：不限",
       "可建立專案數：不限",
       "單一任務下留言則數：不限",
+      "AI 辨識：每分鐘 5 次、每日 100 次",
     ],
   },
   admin: {
     label: "管理員（Admin）",
-    items: ["不受任何額度限制"],
+    items: ["不受任何額度限制", "AI 辨識：每分鐘 20 次、每日 500 次（防呆用，非真正限制）"],
   },
 };
 
@@ -4901,6 +4903,7 @@ function MemberRoleModal({ role, currentUserId, onClose }) {
           <ul className="text-sm text-slate-600 space-y-1 mb-2" style={{ paddingLeft: 18, listStyleType: "disc" }}>
             {current.items.map((t, i) => <li key={i}>{t}</li>)}
           </ul>
+          <p className="text-xs text-slate-400 mb-2">＊AI 辨識另外有一道全站共用上限（每分鐘總計 10 次，不分身分、不分使用者），保護 AI 服務不被同時大量使用打爆，使用人數多的時段可能會比個人上限更早觸發。</p>
 
           {role === "free" && (
             <div className="border-t border-slate-200 pt-4 mt-4">
