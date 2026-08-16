@@ -1865,6 +1865,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [finalComment, setFinalComment] = useState("");
   const [waitingReasonInput, setWaitingReasonInput] = useState("");
   const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
+  const [statusChangeErr, setStatusChangeErr] = useState(null); // 狀態切換專用的錯誤訊息，跟通用的 err 分開，就近顯示在「確認切換」旁邊
   const [editingBody, setEditingBody] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
@@ -2289,8 +2290,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   async function confirmStatusChange() {
     const isWaiting = pendingStatus === "waiting";
     const text = isWaiting ? waitingReasonInput : finalComment;
-    if (!text.trim()) { setErr(isWaiting ? "切換狀態前必須輸入等待中之事由" : "切換狀態前必須填寫最終評論"); return; }
-    setBusy(true); setErr(null);
+    if (!text.trim()) { setStatusChangeErr(isWaiting ? "切換狀態前必須輸入等待中之事由" : "切換狀態前必須填寫最終評論"); return; }
+    setBusy(true); setStatusChangeErr(null);
     try {
       const payload = isWaiting
         ? { status: "waiting", waiting_reason: text }
@@ -2300,7 +2301,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setPendingStatus(null); setFinalComment(""); setWaitingReasonInput("");
       await load();
       onChanged();
-    } catch (e2) { setErr(e2.message); } finally { setBusy(false); }
+    } catch (e2) { setStatusChangeErr(e2.message); } finally { setBusy(false); }
   }
 
   return (
@@ -2835,13 +2836,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             {!pendingStatus ? (
               <div className="flex gap-2">
                 {isCreator && (
-                  <button onClick={() => setPendingStatus("completed")} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">標記為已完成</button>
+                  <button onClick={() => { setPendingStatus("completed"); setStatusChangeErr(null); }} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">標記為已完成</button>
                 )}
                 {mission.status !== "waiting" && (
-                  <button onClick={() => setPendingStatus("waiting")} className="text-xs bg-amber-500 text-white rounded-lg px-3 py-1.5">標記為等待中</button>
+                  <button onClick={() => { setPendingStatus("waiting"); setStatusChangeErr(null); }} className="text-xs bg-amber-500 text-white rounded-lg px-3 py-1.5">標記為等待中</button>
                 )}
                 {isCreator && (
-                  <button onClick={() => setPendingStatus("abandoned")} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">標記為已棄置</button>
+                  <button onClick={() => { setPendingStatus("abandoned"); setStatusChangeErr(null); }} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">標記為已棄置</button>
                 )}
               </div>
             ) : (
@@ -2851,11 +2852,12 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </label>
                 <textarea rows={2} value={pendingStatus === "waiting" ? waitingReasonInput : finalComment}
                   onChange={e => pendingStatus === "waiting" ? setWaitingReasonInput(e.target.value) : setFinalComment(e.target.value)}
-                  placeholder={pendingStatus === "waiting" ? "請輸入等待中之事由" : ""}
+                  placeholder={pendingStatus === "waiting" ? "請輸入等待中之事由…" : pendingStatus === "completed" ? "請輸入完成的評論…" : "請輸入棄置的理由…"}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <button onClick={confirmStatusChange} disabled={busy} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5">確認切換</button>
-                  <button onClick={() => { setPendingStatus(null); setFinalComment(""); setWaitingReasonInput(""); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                  <button onClick={() => { setPendingStatus(null); setFinalComment(""); setWaitingReasonInput(""); setStatusChangeErr(null); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                  {statusChangeErr && <span className="text-xs text-rose-600">{statusChangeErr}</span>}
                 </div>
               </div>
             )}
