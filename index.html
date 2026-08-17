@@ -221,6 +221,7 @@ table { border-collapse: collapse; width: 100%; }
 .p-8 { padding: 2rem; }
 .px-8 { padding-left: 2rem; padding-right: 2rem; }
 .py-8 { padding-top: 2rem; padding-bottom: 2rem; }
+.py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
 .pt-8 { padding-top: 2rem; }
 .pr-8 { padding-right: 2rem; }
 .pl-8 { padding-left: 2rem; }
@@ -351,6 +352,7 @@ table { border-collapse: collapse; width: 100%; }
 .shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06); }
 .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .shadow-lg { box-shadow: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05); }
+.hover\:shadow-md:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06); }
 .shadow-xl { box-shadow: 0 20px 25px rgba(0,0,0,0.1), 0 8px 10px rgba(0,0,0,0.04); }
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
@@ -363,6 +365,7 @@ table { border-collapse: collapse; width: 100%; }
 .flex-wrap { flex-wrap: wrap; }
 .items-center { align-items: center; }
 .items-start { align-items: flex-start; }
+.self-start { align-self: flex-start; }
 .justify-between { justify-content: space-between; }
 .justify-end { justify-content: flex-end; }
 .justify-center { justify-content: center; }
@@ -410,6 +413,14 @@ table { border-collapse: collapse; width: 100%; }
 
   /* 分類 emoji：維持原本色彩，不做任何濾鏡調整 */
   .category-emoji-mono {}
+
+  /* 靈感池卡片內容預覽：保留完整幾行、超過才截斷，比單行「...」保留更多語意 */
+  .line-clamp-5 {
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -1445,10 +1456,10 @@ function newDraftItem(content, extra) {
   return { _key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, content, estimated_minutes: null, requires_travel: false, wait_days_after: 0, from_ai: false, ...extra };
 }
 
-function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, aiBanned }) {
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [contentOpen, setContentOpen] = useState(false); // 任務內容預設收合，因為有 checklist 可以承載細節，不強迫填文字
+function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, aiBanned, initialTitle, initialContent }) {
+  const [title, setTitle] = useState(initialTitle || "");
+  const [content, setContent] = useState(initialContent || "");
+  const [contentOpen, setContentOpen] = useState(!!initialContent); // 有帶入初始內容（例如從靈感升級而來）時，預設直接展開讓使用者看得到
   const [dueDate, setDueDate] = useState(""); // YYYY-MM-DD
   const [dueTime, setDueTime] = useState(""); // HH:MM，留空代表沒有精確時刻
   const [priority, setPriority] = useState("P2");
@@ -1583,7 +1594,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
           })));
         if (clError) throw clError;
       }
-      onCreated();
+      onCreated(created.id);
       onClose();
     } catch (e2) {
       setErr(e2.message);
@@ -4811,6 +4822,296 @@ function GlobalSearchList({ missions, onOpen, projectNameById, hasSearched }) {
 }
 
 // =====================================================================
+// 靈感池：跟任務完全獨立的極簡記錄結構，卡片式呈現，自動儲存
+// =====================================================================
+function relativeTimeText(iso) {
+  if (!iso) return "";
+  const diffSec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diffSec < 10) return "剛剛";
+  if (diffSec < 60) return `${diffSec} 秒前`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} 分鐘前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} 小時前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay} 天前`;
+  return fmtDate(iso);
+}
+
+function IdeaCard({ idea, onClick }) {
+  return (
+    <button onClick={onClick} className="text-left bg-white rounded-2xl shadow p-4 hover:shadow-md transition flex flex-col">
+      {idea.status === "promoted" && (
+        <span className="inline-block text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700 mb-2 self-start">已升級成任務</span>
+      )}
+      {idea.title && <p className="font-semibold text-sm mb-1">{idea.title}</p>}
+      <p className="text-sm text-slate-600 whitespace-pre-wrap line-clamp-5">{idea.content || "（空白）"}</p>
+      <p className="text-xs text-slate-400 mt-3">{relativeTimeText(idea.updated_at || idea.created_at)}</p>
+    </button>
+  );
+}
+
+function IdeaPoolPage({ ideaNotes, onOpenIdea, onNewIdea }) {
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [sortMode, setSortMode] = useState("created_desc"); // created_desc | updated_desc
+
+  function runSearch() { setAppliedSearch(searchInput.trim()); }
+  function clearSearch() { setSearchInput(""); setAppliedSearch(""); }
+
+  const filtered = appliedSearch
+    ? ideaNotes.filter(n => {
+        const q = appliedSearch.toLowerCase();
+        return (n.title || "").toLowerCase().includes(q) || (n.content || "").toLowerCase().includes(q);
+      })
+    : ideaNotes;
+  const sorted = [...filtered].sort((a, b) => {
+    const field = sortMode === "updated_desc" ? "updated_at" : "created_at";
+    return new Date(b[field]) - new Date(a[field]);
+  });
+
+  return (
+    <div>
+      <div className="mb-4">
+        <button onClick={onNewIdea} className="flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-4 py-2 text-sm">
+          <Icon.Plus className="w-4 h-4" />新增靈感
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow p-4 mb-4">
+        <div className="flex gap-2">
+          <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && runSearch()}
+            placeholder="搜尋靈感標題或內容…"
+            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
+            <Icon.Search className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
+          <p className="text-xs text-slate-500">
+            {appliedSearch
+              ? `目前顯示是標題或內容含有「${appliedSearch}」的搜尋結果，共 ${sorted.length} 筆`
+              : `共 ${sorted.length} 則靈感`}
+            {appliedSearch && <button onClick={clearSearch} className="ml-2 text-blue-600 underline">清除搜尋</button>}
+          </p>
+          <div className="flex gap-1 text-xs">
+            <button onClick={() => setSortMode("created_desc")}
+              className={"px-3 py-1.5 rounded-lg " + (sortMode === "created_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>建立時間排序</button>
+            <button onClick={() => setSortMode("updated_desc")}
+              className={"px-3 py-1.5 rounded-lg " + (sortMode === "updated_desc" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500")}>依最後更新</button>
+          </div>
+        </div>
+      </div>
+
+      {sorted.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-10">
+          {appliedSearch ? "＜沒有符合的靈感＞" : "還沒有任何靈感，點左上角「新增靈感」開始記錄吧"}
+        </p>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {sorted.map(n => <IdeaCard key={n.id} idea={n} onClick={() => onOpenIdea(n)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 新增/編輯靈感彈窗：自動儲存用「防抖 2 秒＋最長等待 8 秒」雙重機制（Google Docs 風格）——
+// 打字當下每敲一個字重設 2 秒計時器，停下來 2 秒沒再輸入就存檔；但如果持續不斷輸入、
+// 2 秒防抖永遠不會觸發，所以另外疊一個 8 秒的保險，不管有沒有停頓，超過就強制存一次
+function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote }) {
+  const [ideaId, setIdeaId] = useState(idea?.id || null);
+  const [title, setTitle] = useState(idea?.title || "");
+  const [content, setContent] = useState(idea?.content || "");
+  const [status, setStatus] = useState(idea?.status || "active");
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [dirty, setDirty] = useState(false);
+  const [savingState, setSavingState] = useState("idle"); // idle | saving
+  const [lastSavedAt, setLastSavedAt] = useState(idea?.updated_at || null);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [err, setErr] = useState(null);
+  const [, forceTick] = useState(0); // 純粹用來讓「幾分鐘前」文字定期重新算一次，不影響邏輯
+
+  const debounceRef = useRef(null);
+  const maxWaitRef = useRef(null);
+  const titleRef = useRef(title);
+  const contentRef = useRef(content);
+  titleRef.current = title;
+  contentRef.current = content;
+
+  useEffect(() => {
+    const t = setInterval(() => forceTick(x => x + 1), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  function clearTimers() {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+    if (maxWaitRef.current) { clearTimeout(maxWaitRef.current); maxWaitRef.current = null; }
+  }
+
+  async function actuallySave() {
+    // 標題內容都空、而且從沒存過，沒東西好存，不用打資料庫
+    if (!titleRef.current.trim() && !contentRef.current.trim() && !ideaId) return;
+    setSavingState("saving"); setErr(null);
+    try {
+      if (ideaId) {
+        const { error } = await sb.from("idea_notes")
+          .update({ title: titleRef.current.trim() || null, content: contentRef.current })
+          .eq("id", ideaId);
+        if (error) throw error;
+      } else {
+        const { data: { user } } = await sb.auth.getUser();
+        const { data, error } = await sb.from("idea_notes")
+          .insert({ creator_id: user.id, title: titleRef.current.trim() || null, content: contentRef.current })
+          .select("id").single();
+        if (error) throw error;
+        setIdeaId(data.id);
+      }
+      setDirty(false);
+      setLastSavedAt(new Date().toISOString());
+      onChanged();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSavingState("idle");
+    }
+  }
+  async function doSave() {
+    clearTimers();
+    await actuallySave();
+  }
+  function scheduleAutosave() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { doSave(); }, 2000);
+    if (!maxWaitRef.current) {
+      maxWaitRef.current = setTimeout(() => { doSave(); }, 8000);
+    }
+  }
+  useEffect(() => () => clearTimers(), []); // 卸載時清掉還沒觸發的計時器，避免在已關閉的元件上 setState
+
+  function handleTitleChange(v) {
+    setTitle(v); setDirty(true);
+    if (autoSaveEnabled) scheduleAutosave();
+  }
+  function handleContentChange(v) {
+    setContent(v); setDirty(true);
+    if (autoSaveEnabled) scheduleAutosave();
+  }
+
+  async function handleCloseClick() {
+    if (!dirty) { onClose(); return; }
+    if (autoSaveEnabled) { await doSave(); onClose(); return; }
+    setConfirmClose(true);
+  }
+  async function confirmCloseSave() {
+    await doSave();
+    setConfirmClose(false);
+    onClose();
+  }
+  function confirmCloseDiscard() {
+    setConfirmClose(false);
+    onClose();
+  }
+
+  async function handleDelete() {
+    if (!ideaId) { onClose(); return; }
+    const { error } = await sb.from("idea_notes").delete().eq("id", ideaId);
+    if (error) { setErr(error.message); return; }
+    setConfirmDelete(false);
+    onChanged();
+    onClose();
+  }
+
+  async function handlePromote() {
+    await doSave();
+    onPromote({ id: ideaId, title, content });
+  }
+
+  const savedText = savingState === "saving"
+    ? "儲存中…"
+    : lastSavedAt
+      ? ((Date.now() - new Date(lastSavedAt).getTime()) < 30000 ? "目前內容已自動儲存" : `自動儲存：${relativeTimeText(lastSavedAt)}`)
+      : null;
+
+  return (
+    <>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">
+            {!ideaId ? `您好！${currentUserName}，今天有什麼靈感？` : "編輯靈感"}
+          </h2>
+          <button onClick={handleCloseClick}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+        </div>
+
+        {status === "promoted" && (
+          <p className="text-xs bg-emerald-50 text-emerald-700 rounded-lg px-3 py-2 mb-3">這則靈感已經升級成正式任務了，內容還是可以繼續編輯，但不會再影響那筆任務。</p>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-500">靈感標題（可留空）</label>
+            <input value={title} onChange={e => handleTitleChange(e.target.value)}
+              placeholder="（未命名靈感）" maxLength={200}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">靈感內容</label>
+            <textarea rows={10} value={content} onChange={e => handleContentChange(e.target.value)}
+              placeholder="想到什麼就寫下來…"
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-1.5 text-xs text-slate-500">
+              <input type="checkbox" checked={autoSaveEnabled} onChange={e => setAutoSaveEnabled(e.target.checked)} className="w-4 h-4" />
+              自動儲存
+            </label>
+            {savedText && <span className="text-xs text-slate-400">{savedText}</span>}
+          </div>
+
+          {err && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</p>}
+
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+            <div className="flex gap-2">
+              <button onClick={doSave} disabled={savingState === "saving"} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">儲存靈感</button>
+              {ideaId && status !== "promoted" && (
+                <button onClick={handlePromote} className="bg-violet-50 text-violet-700 text-xs rounded-lg px-4 py-2 font-medium">🚀 升級成任務</button>
+              )}
+            </div>
+            {ideaId && (
+              <button onClick={() => setConfirmDelete(true)} className="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg px-3 py-2">刪除靈感</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {confirmClose && (
+      <ConfirmModal
+        title="內容尚未儲存"
+        message="這則靈感有還沒儲存的修改，要儲存後再離開，還是不儲存直接離開？"
+        confirmLabel="儲存並離開" cancelLabel="不儲存離開"
+        onConfirm={confirmCloseSave}
+        onCancel={confirmCloseDiscard}
+      />
+    )}
+    {confirmDelete && (
+      <ConfirmModal
+        title="刪除靈感"
+        message="確定要刪除這則靈感嗎？此動作無法復原！"
+        confirmLabel="確定刪除" danger
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
+    </>
+  );
+}
+
+// =====================================================================
 // 會員等級與限制說明彈窗
 // =====================================================================
 const MEMBER_ROLE_LIMITS = {
@@ -5031,6 +5332,10 @@ function Dashboard({ session, profile, setProfile }) {
   const [starredIds, setStarredIds] = useState([]);
   const [friendProfiles, setFriendProfiles] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [ideaNotes, setIdeaNotes] = useState([]);
+  const [ideaModalOpen, setIdeaModalOpen] = useState(false);
+  const [editingIdeaObj, setEditingIdeaObj] = useState(null); // null=新增；有值=編輯既有靈感
+  const [promotingIdea, setPromotingIdea] = useState(null); // { id, title, content }｜null：靈感升級成任務時，暫存要帶進新增任務表單的資料
   const [myProjectIds, setMyProjectIds] = useState([]);
   const [openProjectId, setOpenProjectId] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -5085,6 +5390,11 @@ function Dashboard({ session, profile, setProfile }) {
     setProjects(data || []);
   }, []);
 
+  const loadIdeaNotes = useCallback(async () => {
+    const { data } = await sb.from("idea_notes").select("*").order("created_at", { ascending: false });
+    setIdeaNotes(data || []);
+  }, []);
+
   // 自己所屬（發起或加入）的專案 ID 清單。project_members 這張表沒有給 admin 額外的讀取權限，
   // 所以不管是不是 admin，這裡查到的都只會是「自己真正有份」的專案，可以用來在前端一致地
   // 過濾掉 admin 因為管理用途的資料庫權限而多讀到、但畫面上不該顯示給自己看的任務/專案。
@@ -5101,7 +5411,7 @@ function Dashboard({ session, profile, setProfile }) {
 
   useEffect(() => { openProjectIdRef.current = openProjectId; loadCurrentProjectMembers(openProjectId); }, [openProjectId, loadCurrentProjectMembers]);
 
-  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); loadStarredIds(); loadFriendProfiles(); loadProjects(); loadMyProjectIds(); }, [loadMissions, loadNotifs, loadHiddenIds, loadStarredIds, loadFriendProfiles, loadProjects, loadMyProjectIds]);
+  useEffect(() => { loadMissions(); loadNotifs(); loadHiddenIds(); loadStarredIds(); loadFriendProfiles(); loadProjects(); loadMyProjectIds(); loadIdeaNotes(); }, [loadMissions, loadNotifs, loadHiddenIds, loadStarredIds, loadFriendProfiles, loadProjects, loadMyProjectIds, loadIdeaNotes]);
 
   async function hideMission(missionId) {
     setHiddenIds(ids => ids.includes(missionId) ? ids : [...ids, missionId]);
@@ -5128,6 +5438,14 @@ function Dashboard({ session, profile, setProfile }) {
   async function deleteMission(missionId) {
     const { error } = await sb.from("missions").delete().eq("id", missionId);
     if (!error) loadMissions();
+  }
+
+  // 靈感升級成任務：NewMissionModal 建立成功後回呼，把這則靈感標記為 promoted、記錄對應的任務 id
+  async function handleIdeaPromoted(ideaId, missionId) {
+    await sb.from("idea_notes").update({ status: "promoted", promoted_to_mission_id: missionId }).eq("id", ideaId);
+    loadIdeaNotes();
+    loadMissions();
+    setPromotingIdea(null);
   }
 
   async function deleteProject() {
@@ -5369,7 +5687,7 @@ function Dashboard({ session, profile, setProfile }) {
         <div className="flex items-center gap-6">
           <h1 className="font-bold text-slate-800">任務雲 TaskCloud</h1>
           <nav className="flex gap-1 text-sm">
-            {[["list","個人任務"],["project","專案任務"],["category","類別瀏覽"],["globalSearch","全域搜尋"],["settings","系統管理"]].map(([k,l]) => (
+            {[["list","個人任務"],["project","專案任務"],["category","類別瀏覽"],["globalSearch","全域搜尋"],["ideas","靈感池"],["settings","系統管理"]].map(([k,l]) => (
               <button key={k} onClick={() => setTab(k)} className={"px-3 py-1.5 rounded-lg " + (tab===k ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-100")}>{l}</button>
             ))}
           </nav>
@@ -5817,9 +6135,41 @@ function Dashboard({ session, profile, setProfile }) {
           </>
         )}
 
+        {tab === "ideas" && (
+          <IdeaPoolPage
+            ideaNotes={ideaNotes}
+            onOpenIdea={idea => { setEditingIdeaObj(idea); setIdeaModalOpen(true); }}
+            onNewIdea={() => { setEditingIdeaObj(null); setIdeaModalOpen(true); }}
+          />
+        )}
+
         {tab === "settings" && <SettingsView profile={profile} onProfileChange={setProfile} />}
       </main>
 
+      {ideaModalOpen && (
+        <IdeaEditorModal
+          idea={editingIdeaObj}
+          currentUserName={profile.display_name}
+          onClose={() => setIdeaModalOpen(false)}
+          onChanged={loadIdeaNotes}
+          onPromote={idea => { setIdeaModalOpen(false); setPromotingIdea(idea); }}
+        />
+      )}
+      {promotingIdea && (
+        <NewMissionModal
+          onClose={() => setPromotingIdea(null)}
+          onCreated={missionId => handleIdeaPromoted(promotingIdea.id, missionId)}
+          priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels}
+          priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display}
+          priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override}
+          currentUserId={profile.id} currentUserName={profile.display_name}
+          fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override}
+          aiBanned={aiBanned}
+          assigneeOptions={friendProfiles}
+          initialTitle={promotingIdea.title || (promotingIdea.content || "").slice(0, 60)}
+          initialContent={promotingIdea.content}
+        />
+      )}
       {showNew && (
         <NewMissionModal
           onClose={() => setShowNew(false)}
