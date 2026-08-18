@@ -357,6 +357,7 @@ table { border-collapse: collapse; width: 100%; }
 .flex { display: flex; }
 .flex-col { flex-direction: column; }
 .inline-block { display: inline-block; }
+.inline-flex { display: inline-flex; }
 .block { display: block; }
 .grid { display: grid; }
 .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -746,10 +747,14 @@ const DEFAULT_CATEGORY_DISPLAY_MODES = { detail_view: "text", detail_edit: "text
 // 依顯示模式組出「類別」欄位要印的文字：文字/圖案(emoji)/文字+圖案。
 // emojiOverride 是使用者自訂的分類圖示覆蓋值（沒改過的分類會自動退回內建預設 CATEGORY_EMOJI）。
 // emoji 一律用灰階濾鏡呈現（方案 A：保留使用者可自訂 emoji 的彈性，同時視覺上簡約一點，不是彩色）
-function renderCategoryText(displayModes, context, primaryCategory, emojiOverride) {
+function renderCategoryText(displayModes, context, primaryCategory, emojiOverride, workDim, workSubDimensionKey) {
   if (!primaryCategory) return "—";
   const mode = (displayModes && displayModes[context]) || "text";
-  const label = AI_CATEGORY_LABELS[primaryCategory];
+  let label = AI_CATEGORY_LABELS[primaryCategory];
+  if (primaryCategory === "work") {
+    const sub = workSubLabel(workSubDimensionKey, workDim);
+    if (sub) label = `${label}-${sub}`;
+  }
   const emoji = (emojiOverride && emojiOverride[primaryCategory]) || CATEGORY_EMOJI[primaryCategory];
   if (mode === "icon") return <span className="category-emoji-mono">{emoji}</span>;
   if (mode === "text_icon") return <><span className="category-emoji-mono">{emoji}</span> {label}</>;
@@ -1129,6 +1134,87 @@ const CATEGORY_CARD_COLOR = {
   social: "#ec4899", learning: "#8b5cf6", travel: "#06b6d4", admin: "#64748b", other: "#94a3b8",
 };
 
+// =====================================================================
+// 「工作」分類專用的六個管理學維度：功能子類別/任務層級/優先矩陣/任務型態/成長策略/資源瓶頸
+// =====================================================================
+const WORK_SUB_DIMENSION_OPTIONS = [
+  { key: "none", label: "不顯示" },
+  { key: "functional_category", label: "功能子類別（例：工作-內部:研發工藝）" },
+  { key: "task_level", label: "任務層級" },
+  { key: "priority_quadrant", label: "優先矩陣" },
+  { key: "task_type", label: "任務型態" },
+  { key: "growth_strategy", label: "成長策略" },
+  { key: "resource_bottleneck", label: "資源瓶頸" },
+];
+
+// 跟 demo.html 完全一致的色調系統：每個維度的每個選項對應固定色調，一眼就能分辨是哪個維度
+const WORK_TONE_COLORS = {
+  blue: { bg: "#e6eef7", text: "#2f5f92" },
+  teal: { bg: "#e2f2ef", text: "#2c7a6b" },
+  purple: { bg: "#ece3f5", text: "#6c47a6" },
+  amber: { bg: "#faf0da", text: "#96701a" },
+  red: { bg: "#fbe4e0", text: "#b3432f" },
+  orange: { bg: "#fbe9d8", text: "#b1601e" },
+  yellow: { bg: "#f9f2cf", text: "#8a7513" },
+  gray: { bg: "#ece9e3", text: "#5c564d" },
+  indigo: { bg: "#e4e6f7", text: "#4650a3" },
+  pink: { bg: "#f8e3ee", text: "#a4406f" },
+  green: { bg: "#e5f2e3", text: "#43793d" },
+};
+const WORK_DIMENSION_TONE_MAP = {
+  internal_external: { "內部": "blue", "外部": "teal" },
+  task_level: { "策略": "purple", "戰術": "amber", "執行": "gray" },
+  priority_quadrant: { "重要且緊急": "red", "重要不緊急": "orange", "不重要但緊急": "yellow", "不重要不緊急": "gray" },
+  task_type: { "專案型": "indigo", "常態型": "gray" },
+  growth_strategy: { "市場滲透": "green", "產品開發": "teal", "市場開拓": "blue", "多角化": "pink", "不適用": "gray" },
+  resource_bottleneck: { "時間": "amber", "資金": "purple", "人力": "indigo", "物料": "teal", "無明顯瓶頸": "gray" },
+};
+const WORK_INTERNAL_FUNCTIONAL_CATEGORIES = ["原料採購", "工具設備", "生產製作", "工作室空間", "研發工藝", "財務行政", "人力技能"];
+function workDimTone(dimKey, value) {
+  if (!value) return "gray";
+  if (dimKey === "functional_category") {
+    if (WORK_INTERNAL_FUNCTIONAL_CATEGORIES.includes(value)) return "blue";
+    if (value === "其他") return "gray";
+    return "teal";
+  }
+  return (WORK_DIMENSION_TONE_MAP[dimKey] && WORK_DIMENSION_TONE_MAP[dimKey][value]) || "gray";
+}
+// 圓角色彩徽章：淺底色 + 深色文字，前面帶一個較淡的小維度標籤，跟 demo.html 的 .badge 樣式一致
+function WorkDimBadge({ label, value, dimKey }) {
+  const tone = WORK_TONE_COLORS[workDimTone(dimKey, value)];
+  return (
+    <span className="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap"
+      style={{ background: tone.bg, color: tone.text }}>
+      <span className="mr-1" style={{ opacity: 0.65, fontWeight: 500 }}>{label}</span>{value}
+    </span>
+  );
+}
+
+const WORK_DIMENSION_DEFS = [
+  { key: "functional_category", label: "功能子類別", options: [
+    "原料採購", "工具設備", "生產製作", "工作室空間", "研發工藝", "財務行政", "人力技能",
+    "通路擺攤", "通路線上", "品牌行銷", "定價促銷", "客戶服務", "其他",
+  ] },
+  { key: "task_level", label: "任務層級", options: ["策略", "戰術", "執行"] },
+  { key: "priority_quadrant", label: "優先矩陣", options: ["重要且緊急", "重要不緊急", "不重要但緊急", "不重要不緊急"] },
+  { key: "task_type", label: "任務型態", options: ["專案型", "常態型"] },
+  { key: "growth_strategy", label: "成長策略", options: ["市場滲透", "產品開發", "市場開拓", "多角化", "不適用"] },
+  { key: "resource_bottleneck", label: "資源瓶頸", options: ["時間", "資金", "人力", "物料", "無明顯瓶頸"] },
+];
+// 依 profile.work_sub_dimension 設定，組出「工作」分類要接在後面的子標籤文字；
+// growth_strategy=不適用 時不顯示任何子標籤（維持只顯示「工作」）
+function workSubLabel(subDimensionKey, workDim) {
+  if (!subDimensionKey || subDimensionKey === "none" || !workDim) return null;
+  if (subDimensionKey === "functional_category") {
+    if (!workDim.internal_external || !workDim.functional_category) return null;
+    return `${workDim.internal_external}:${workDim.functional_category}`;
+  }
+  const val = workDim[subDimensionKey];
+  if (!val || val === "不適用") return null;
+  return val;
+}
+
+
 // 狀態分層：未結案(0) < 已完成(1) < 已棄置(2)，類別瀏覽頁列表照這個順序分段顯示
 function statusTier(status) {
   if (status === "completed") return 1;
@@ -1277,6 +1363,24 @@ async function callAiRecognize(title) {
     throw e;
   }
   return json; // { date_type, extracted_deadline_date, extracted_deadline_time, category_scores, subtasks }
+}
+
+// 「工作」分類專用的六個管理學維度標記，跟 callAiRecognize 共用同一套額度/帳號鎖定機制（同一個 Edge Function 家族）
+async function callAiWorkDimensions(title, content) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { const e = new Error("請重新登入後再試"); e.code = "UNAUTHENTICATED"; throw e; }
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/ai-work-dimensions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ title, content }),
+  });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const e = new Error(json.error || "AI 標記失敗，請稍後再試");
+    e.code = json.code || "UNKNOWN_ERROR";
+    throw e;
+  }
+  return json; // { internal_external, functional_category, task_level, priority_quadrant, task_type, growth_strategy, resource_bottleneck, keywords, rationale }
 }
 
 // 簡易圖示
@@ -1479,6 +1583,12 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [categoryEditing, setCategoryEditing] = useState(false);
   const [categoryDraft, setCategoryDraft] = useState([]);
+  // 「工作」六個管理學維度：新增任務時還沒有 mission_id，先存本地草稿，等任務建立成功後才真的寫進資料庫
+  const [workDimOpen, setWorkDimOpen] = useState(false);
+  const [workDimDraft, setWorkDimDraft] = useState({});
+  const [workDimFromAi, setWorkDimFromAi] = useState(false);
+  const [workAiBusy, setWorkAiBusy] = useState(false);
+  const [workAiErr, setWorkAiErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -1566,6 +1676,32 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     setCategoryEditing(false);
   }
 
+  function updateWorkDimDraft(key, value) {
+    setWorkDimDraft(d => {
+      const next = { ...d, [key]: value };
+      if (key === "internal_external" && value !== "外部") next.growth_strategy = "不適用";
+      return next;
+    });
+    setWorkDimFromAi(false); // 手動改過就不算是純 AI 結果了
+  }
+  async function runWorkDimAi() {
+    setWorkAiBusy(true); setWorkAiErr(null);
+    try {
+      const result = await callAiWorkDimensions(title, content);
+      setWorkDimDraft(result);
+      setWorkDimFromAi(true);
+      setWorkDimOpen(true);
+    } catch (e) {
+      if (AI_QUOTA_ERROR_CODES.has(e.code)) {
+        setAiQuotaModal({ title: AI_QUOTA_ERROR_TITLES[e.code] || "已達使用上限", message: e.message });
+      } else {
+        setWorkAiErr(e.message);
+      }
+    } finally {
+      setWorkAiBusy(false);
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true); setErr(null);
@@ -1593,6 +1729,13 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
             wait_days_after: it.wait_days_after, from_ai: it.from_ai,
           })));
         if (clError) throw clError;
+      }
+      const currentPrimaryCategory = aiCategoryScores ? primaryCategoryOf(aiCategoryScores) : null;
+      if (currentPrimaryCategory === "work" && Object.values(workDimDraft).some(v => v)) {
+        const { error: wdError } = await sb.from("mission_work_dimensions").insert({
+          mission_id: created.id, ...workDimDraft, from_ai: workDimFromAi,
+        });
+        if (wdError) throw wdError;
       }
       onCreated(created.id);
       onClose();
@@ -1668,6 +1811,53 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
               </div>
             )}
           </div>
+
+          {(aiCategoryScores ? primaryCategoryOf(aiCategoryScores) : null) === "work" && (
+            <div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-slate-500">{fieldLabelPrefix}工作維度：{Object.values(workDimDraft).some(v => v) ? "已標記" : "尚未標記"}</label>
+                <button type="button" onClick={() => setWorkDimOpen(v => !v)} title={workDimOpen ? "收合" : "展開設定六個維度"}
+                  className={"flex items-center justify-center w-5 h-5 rounded " + (workDimOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                  <Icon.Search className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {workDimOpen && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                  <div className="flex items-center gap-3 mb-2">
+                    <button type="button" onClick={runWorkDimAi} disabled={workAiBusy || aiBanned}
+                      title={aiBanned ? "AI 辨識功能目前暫時無法使用" : undefined}
+                      className="text-xs text-violet-700 hover:text-violet-800 disabled:opacity-50">
+                      {workAiBusy ? "標記中…" : "✨ AI 標記維度"}
+                    </button>
+                  </div>
+                  {workAiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-2">{workAiErr}</p>}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-slate-500 text-xs shrink-0">內部/外部</label>
+                      <select value={workDimDraft.internal_external || ""} onChange={e => updateWorkDimDraft("internal_external", e.target.value)}
+                        className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs">
+                        <option value="">未設定</option>
+                        <option value="內部">內部</option>
+                        <option value="外部">外部</option>
+                      </select>
+                    </div>
+                    {WORK_DIMENSION_DEFS.map(d => (
+                      <div key={d.key} className="flex items-center gap-2">
+                        <label className="text-slate-500 text-xs shrink-0">{d.label}</label>
+                        <select value={workDimDraft[d.key] || ""} onChange={e => updateWorkDimDraft(d.key, e.target.value)}
+                          disabled={d.key === "growth_strategy" && workDimDraft.internal_external !== "外部"}
+                          className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs disabled:opacity-50">
+                          <option value="">未設定</option>
+                          {d.options.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                  {workDimDraft.rationale && <p className="text-xs text-slate-400 mt-2">理由：{workDimDraft.rationale}</p>}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="border-t border-slate-200 pt-3">
             <label className="text-xs text-slate-500">{fieldLabelPrefix}檢查清單</label>
@@ -1864,7 +2054,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, workSubDimension, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -1912,11 +2102,19 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [categoryDraft, setCategoryDraft] = useState([]); // 手動分類編輯中的多選草稿
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryErr, setCategoryErr] = useState(null);
+  // 「工作」分類專用的六個管理學維度：手動編輯 + AI 標記共用同一組草稿狀態
+  const [workDimOpen, setWorkDimOpen] = useState(false);
+  const [workDimEditing, setWorkDimEditing] = useState(false);
+  const [workDimDraft, setWorkDimDraft] = useState({});
+  const [workDimBusy, setWorkDimBusy] = useState(false);
+  const [workDimErr, setWorkDimErr] = useState(null);
+  const [workAiBusy, setWorkAiBusy] = useState(false);
+  const [workAiErr, setWorkAiErr] = useState(null);
 
   const load = useCallback(async () => {
     const [missionRes, updatesRes, checklistRes] = await Promise.all([
       sb.from("missions")
-        .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), project:projects(id,name)")
+        .select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), project:projects(id,name), work_dimensions:mission_work_dimensions(*)")
         .eq("id", missionId).single(),
       sb.from("mission_updates")
         .select("*, author:profiles!mission_updates_author_id_fkey(id,display_name)")
@@ -2005,6 +2203,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   }, [checklist, mission?.scale_source, mission?.scale, missionId]);
 
   if (!mission) return null;
+  const normalizedWorkDim = Array.isArray(mission.work_dimensions) ? mission.work_dimensions[0] : mission.work_dimensions;
 
   const isCreator = mission.creator_id === currentUser.id;
   const isAssignee = mission.assigned_id === currentUser.id;
@@ -2165,10 +2364,72 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setMission(m => ({ ...m, category_scores: scores, primary_category: scores ? primaryCategoryOf(scores) : null }));
       setAiCategoryScores(null); // 手動存檔後這筆就是最新的權威值，清掉待確認的 AI 草稿，避免顯示邏輯誤用舊草稿蓋掉剛存好的結果
       setCategoryEditing(false);
+      onChanged(); // 讓 Dashboard 的 missions 列表也立即重抓，不然任務列表/類別瀏覽的「類別」欄位要等 realtime 或重新整理才會更新
     } catch (e) {
       setCategoryErr(e.message);
     } finally {
       setCategoryBusy(false);
+    }
+  }
+
+  // 「工作」六個管理學維度：手動編輯起手式——把目前值（沒有就是空字串）灌進草稿
+  function startWorkDimEdit() {
+    const wd = normalizedWorkDim || {};
+    setWorkDimDraft({
+      internal_external: wd.internal_external || "",
+      functional_category: wd.functional_category || "",
+      task_level: wd.task_level || "",
+      priority_quadrant: wd.priority_quadrant || "",
+      task_type: wd.task_type || "",
+      growth_strategy: wd.growth_strategy || "",
+      resource_bottleneck: wd.resource_bottleneck || "",
+    });
+    setWorkDimErr(null);
+    setWorkDimEditing(true);
+  }
+  function updateWorkDimDraft(key, value) {
+    setWorkDimDraft(d => {
+      const next = { ...d, [key]: value };
+      // internal_external 改成「內部」時，growth_strategy 只對「外部」有意義，跟著鎖成「不適用」
+      if (key === "internal_external" && value !== "外部") next.growth_strategy = "不適用";
+      return next;
+    });
+  }
+  async function saveWorkDimEdit() {
+    setWorkDimBusy(true); setWorkDimErr(null);
+    try {
+      const payload = { mission_id: missionId };
+      WORK_DIMENSION_DEFS.forEach(d => { payload[d.key] = workDimDraft[d.key] || null; });
+      payload.internal_external = workDimDraft.internal_external || null;
+      const { error } = await sb.from("mission_work_dimensions").upsert(payload, { onConflict: "mission_id" });
+      if (error) throw error;
+      await load();
+      setWorkDimEditing(false);
+      onChanged(); // mission_work_dimensions 是獨立的表，不會觸發 missions 本身的 realtime 事件，
+                   // 不主動呼叫的話，任務列表／類別瀏覽的「工作-XXX」子標籤要等重新整理才會看到最新結果
+    } catch (e) {
+      setWorkDimErr(e.message);
+    } finally {
+      setWorkDimBusy(false);
+    }
+  }
+  async function runWorkDimAi() {
+    setWorkAiBusy(true); setWorkAiErr(null);
+    try {
+      const result = await callAiWorkDimensions(mission.title, mission.content || "");
+      const payload = { mission_id: missionId, ...result, from_ai: true };
+      const { error } = await sb.from("mission_work_dimensions").upsert(payload, { onConflict: "mission_id" });
+      if (error) throw error;
+      await load();
+      onChanged(); // 同上，AI 標記完也要主動通知 Dashboard 重抓，不然要等重新整理頁面
+    } catch (e) {
+      if (AI_QUOTA_ERROR_CODES.has(e.code)) {
+        setAiQuotaModal({ title: AI_QUOTA_ERROR_TITLES[e.code] || "已達使用上限", message: e.message });
+      } else {
+        setWorkAiErr(e.message);
+      }
+    } finally {
+      setWorkAiBusy(false);
     }
   }
 
@@ -2391,7 +2652,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
             <div className="text-xs text-slate-500 mb-3">
               <div className="flex items-center gap-1.5">
-                <span>任務類別：{mission.primary_category ? renderCategoryText(categoryDisplay, "detail_view", mission.primary_category, categoryEmojiOverride) : "尚未分類"}</span>
+                <span>任務類別：{mission.primary_category ? renderCategoryText(categoryDisplay, "detail_view", mission.primary_category, categoryEmojiOverride, normalizedWorkDim, workSubDimension) : "尚未分類"}</span>
                 <button onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                   className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
                   <Icon.Search className="w-3.5 h-3.5" />
@@ -2420,6 +2681,88 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </div>
               )}
             </div>
+            {mission.primary_category === "work" && (
+              <div className="text-xs text-slate-500 mb-3">
+                <div className="flex items-center gap-1.5">
+                  <span>工作維度：{normalizedWorkDim ? "已標記" : "尚未標記"}</span>
+                  <button onClick={() => setWorkDimOpen(v => !v)} title={workDimOpen ? "收合" : "展開查看六個維度"}
+                    className={"flex items-center justify-center w-5 h-5 rounded " + (workDimOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                    <Icon.Search className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {workDimOpen && (
+                  <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                    {!workDimEditing ? (
+                      <>
+                        {normalizedWorkDim ? (
+                          <div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {normalizedWorkDim.internal_external && (
+                                <WorkDimBadge label="內部/外部" value={normalizedWorkDim.internal_external} dimKey="internal_external" />
+                              )}
+                              {WORK_DIMENSION_DEFS.map(d => (
+                                normalizedWorkDim[d.key] && normalizedWorkDim[d.key] !== "不適用" && (
+                                  <WorkDimBadge key={d.key} label={d.label} value={normalizedWorkDim[d.key]} dimKey={d.key} />
+                                )
+                              ))}
+                            </div>
+                            {normalizedWorkDim.keywords?.length > 0 && (
+                              <p className="text-slate-400 mt-2">關鍵字：{normalizedWorkDim.keywords.join("、")}</p>
+                            )}
+                            {normalizedWorkDim.rationale && (
+                              <p className="text-slate-400 mt-1">理由：{normalizedWorkDim.rationale}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-slate-400">尚未標記任何維度</p>
+                        )}
+                        {isCreator && (
+                          <div className="flex items-center gap-3 mt-2">
+                            <button onClick={startWorkDimEdit} className="text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定維度</button>
+                            <button onClick={runWorkDimAi} disabled={workAiBusy || aiBanned}
+                              title={aiBanned ? "AI 辨識功能目前暫時無法使用" : undefined}
+                              className="text-xs text-violet-700 hover:text-violet-800 disabled:opacity-50">
+                              {workAiBusy ? "標記中…" : "✨ AI 標記維度"}
+                            </button>
+                          </div>
+                        )}
+                        {workAiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{workAiErr}</p>}
+                      </>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <label className="text-slate-500 shrink-0">內部/外部</label>
+                            <select value={workDimDraft.internal_external || ""} onChange={e => updateWorkDimDraft("internal_external", e.target.value)}
+                              className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs">
+                              <option value="">未設定</option>
+                              <option value="內部">內部</option>
+                              <option value="外部">外部</option>
+                            </select>
+                          </div>
+                          {WORK_DIMENSION_DEFS.map(d => (
+                            <div key={d.key} className="flex items-center gap-2">
+                              <label className="text-slate-500 shrink-0">{d.label}</label>
+                              <select value={workDimDraft[d.key] || ""} onChange={e => updateWorkDimDraft(d.key, e.target.value)}
+                                disabled={d.key === "growth_strategy" && workDimDraft.internal_external !== "外部"}
+                                className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs disabled:opacity-50">
+                                <option value="">未設定</option>
+                                {d.options.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                        {workDimErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{workDimErr}</p>}
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={saveWorkDimEdit} disabled={workDimBusy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">{workDimBusy ? "儲存中…" : "儲存"}</button>
+                          <button onClick={() => setWorkDimEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="text-xs text-slate-400 mb-3">
               {mission.project_id
                 ? `誰可以看：專案「${mission.project?.name}」的所有成員（${projectMembers.map(p => p.display_name).join("、")}）`
@@ -2457,7 +2800,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               <div className="flex items-center gap-1.5">
                 <label className="text-xs text-slate-500">{fieldLabelPrefix}任務類別：{(() => {
                   const p = aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category;
-                  return p ? renderCategoryText(categoryDisplay, "detail_edit", p, categoryEmojiOverride) : "尚未分類";
+                  return p ? renderCategoryText(categoryDisplay, "detail_edit", p, categoryEmojiOverride, normalizedWorkDim, workSubDimension) : "尚未分類";
                 })()}</label>
                 <button type="button" onClick={() => setCategoryOpen(v => !v)} title={categoryOpen ? "收合" : "展開查看完整分類權重"}
                   className={"flex items-center justify-center w-5 h-5 rounded " + (categoryOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
@@ -2485,6 +2828,88 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </div>
               )}
             </div>
+            {(aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category) === "work" && (
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <label className="text-xs text-slate-500">{fieldLabelPrefix}工作維度：{normalizedWorkDim ? "已標記" : "尚未標記"}</label>
+                  <button type="button" onClick={() => setWorkDimOpen(v => !v)} title={workDimOpen ? "收合" : "展開查看六個維度"}
+                    className={"flex items-center justify-center w-5 h-5 rounded " + (workDimOpen ? "bg-blue-100 text-blue-600" : "text-slate-400 hover:text-slate-600")}>
+                    <Icon.Search className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {workDimOpen && (
+                  <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                    {!workDimEditing ? (
+                      <>
+                        {normalizedWorkDim ? (
+                          <div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {normalizedWorkDim.internal_external && (
+                                <WorkDimBadge label="內部/外部" value={normalizedWorkDim.internal_external} dimKey="internal_external" />
+                              )}
+                              {WORK_DIMENSION_DEFS.map(d => (
+                                normalizedWorkDim[d.key] && normalizedWorkDim[d.key] !== "不適用" && (
+                                  <WorkDimBadge key={d.key} label={d.label} value={normalizedWorkDim[d.key]} dimKey={d.key} />
+                                )
+                              ))}
+                            </div>
+                            {normalizedWorkDim.keywords?.length > 0 && (
+                              <p className="text-slate-400 mt-2">關鍵字：{normalizedWorkDim.keywords.join("、")}</p>
+                            )}
+                            {normalizedWorkDim.rationale && (
+                              <p className="text-slate-400 mt-1">理由：{normalizedWorkDim.rationale}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-slate-400">尚未標記任何維度</p>
+                        )}
+                        {isCreator && (
+                          <div className="flex items-center gap-3 mt-2">
+                            <button type="button" onClick={startWorkDimEdit} className="text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定維度</button>
+                            <button type="button" onClick={runWorkDimAi} disabled={workAiBusy || aiBanned}
+                              title={aiBanned ? "AI 辨識功能目前暫時無法使用" : undefined}
+                              className="text-xs text-violet-700 hover:text-violet-800 disabled:opacity-50">
+                              {workAiBusy ? "標記中…" : "✨ AI 標記維度"}
+                            </button>
+                          </div>
+                        )}
+                        {workAiErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{workAiErr}</p>}
+                      </>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <label className="text-slate-500 shrink-0">內部/外部</label>
+                            <select value={workDimDraft.internal_external || ""} onChange={e => updateWorkDimDraft("internal_external", e.target.value)}
+                              className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs">
+                              <option value="">未設定</option>
+                              <option value="內部">內部</option>
+                              <option value="外部">外部</option>
+                            </select>
+                          </div>
+                          {WORK_DIMENSION_DEFS.map(d => (
+                            <div key={d.key} className="flex items-center gap-2">
+                              <label className="text-slate-500 shrink-0">{d.label}</label>
+                              <select value={workDimDraft[d.key] || ""} onChange={e => updateWorkDimDraft(d.key, e.target.value)}
+                                disabled={d.key === "growth_strategy" && workDimDraft.internal_external !== "外部"}
+                                className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-xs disabled:opacity-50">
+                                <option value="">未設定</option>
+                                {d.options.map(o => <option key={o} value={o}>{o}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                        {workDimErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{workDimErr}</p>}
+                        <div className="flex gap-2 mt-2">
+                          <button type="button" onClick={saveWorkDimEdit} disabled={workDimBusy} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">{workDimBusy ? "儲存中…" : "儲存"}</button>
+                          <button type="button" onClick={() => setWorkDimEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-xs text-slate-500">{fieldLabelPrefix}重要性</label>
               <div className="flex gap-2 mt-1">
@@ -2926,7 +3351,7 @@ const COLUMN_LABELS = {
   checklist_progress: "檢查清單進度", category_score: "類別分數", source: "來源", category: "類別",
 };
 
-function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode, showCategoryColumns, categoryKey, projectNameById, categoryDisplay, categoryEmojiOverride }) {
+function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, visibleColumns, currentUserId, hiddenIds, onHide, onUnhide, onDelete, relationDisplayMode, dueDateDisplayList, dueDateColorOverride, sortMode, sortHighlightColor, forceShowSortColumn, noProgressColorOverride, noProgressSeverityDays, starredIds, onStar, onUnstar, starOverrideColor, columnMode, columnOrder, checklistDisplayMode, showCategoryColumns, categoryKey, projectNameById, categoryDisplay, categoryEmojiOverride, workSubDimension }) {
   const isClosedMode = columnMode === "closed";
   const columnDefs = isClosedMode ? TASK_LIST_COLUMNS_CLOSED : TASK_LIST_COLUMNS;
   const vc = visibleColumns || (isClosedMode ? DEFAULT_VISIBLE_COLUMNS_CLOSED : DEFAULT_VISIBLE_COLUMNS);
@@ -3002,7 +3427,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
           : noProgressText(m.updated_at, m.status),
         "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle
       );
-      case "category": return td(key, renderCategoryText(categoryDisplay, "list", m.primary_category, categoryEmojiOverride), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
+      case "category": return td(key, renderCategoryText(categoryDisplay, "list", m.primary_category, categoryEmojiOverride, Array.isArray(m.work_dimensions) ? m.work_dimensions[0] : m.work_dimensions, workSubDimension), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "title": return td(key, m.title, "px-4 py-3 font-medium", null, rowStarStyle);
       case "category_score": return td(key,
         m.category_scores ? (Number(m.category_scores[categoryKey]) || 0).toFixed(2) : "—",
@@ -3393,8 +3818,10 @@ function SettingsView({ profile, onProfileChange }) {
 
   const categoryDisplay = profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES;
   const categoryEmojiOverride = profile.category_emoji_override || {};
+  const workSubDimension = profile.work_sub_dimension || "functional_category";
   const [editingCategoryDisplay, setEditingCategoryDisplay] = useState(false);
   const [categoryDisplayDraft, setCategoryDisplayDraft] = useState(categoryDisplay);
+  const [workSubDimensionDraft, setWorkSubDimensionDraft] = useState(workSubDimension);
   const [categoryEmojiDraft, setCategoryEmojiDraft] = useState(
     Object.fromEntries(AI_CATEGORIES.map(k => [k, categoryEmojiOverride[k] || CATEGORY_EMOJI[k]]))
   );
@@ -3404,6 +3831,7 @@ function SettingsView({ profile, onProfileChange }) {
   function startEditCategoryDisplay() {
     setCategoryDisplayDraft(categoryDisplay);
     setCategoryEmojiDraft(Object.fromEntries(AI_CATEGORIES.map(k => [k, categoryEmojiOverride[k] || CATEGORY_EMOJI[k]])));
+    setWorkSubDimensionDraft(workSubDimension);
     setEditingCategoryDisplay(true);
   }
   // 判斷輸入是不是「剛好一個視覺字元」（grapheme cluster）：emoji 常常是好幾個 code unit 組成
@@ -3433,11 +3861,11 @@ function SettingsView({ profile, onProfileChange }) {
       }
     });
     const { error } = await sb.from("profiles").update({
-      category_display: categoryDisplayDraft, category_emoji_override: nextOverride,
+      category_display: categoryDisplayDraft, category_emoji_override: nextOverride, work_sub_dimension: workSubDimensionDraft,
     }).eq("id", profile.id);
     setSavingCategoryDisplay(false);
     if (!error) {
-      onProfileChange({ ...profile, category_display: categoryDisplayDraft, category_emoji_override: nextOverride });
+      onProfileChange({ ...profile, category_display: categoryDisplayDraft, category_emoji_override: nextOverride, work_sub_dimension: workSubDimensionDraft });
       setEditingCategoryDisplay(false);
       if (invalidKeys.length > 0) setInvalidEmojiNotice(invalidKeys.map(k => AI_CATEGORY_LABELS[k]).join("、"));
     } else {
@@ -4084,6 +4512,21 @@ function SettingsView({ profile, onProfileChange }) {
               </div>
             </div>
 
+            <div className="mb-3 pt-3 border-t border-slate-200">
+              <div className="flex justify-between items-center text-xs">
+                <label className="text-slate-500">「工作」分類子維度顯示（例：工作-內部:研發工藝）：</label>
+                {editingCategoryDisplay ? (
+                  <select value={workSubDimensionDraft} onChange={e => setWorkSubDimensionDraft(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    {WORK_SUB_DIMENSION_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                ) : (
+                  <span className="font-medium">{WORK_SUB_DIMENSION_OPTIONS.find(o => o.key === workSubDimension)?.label}</span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">只影響「工作」這個分類，其餘 9 個分類不受影響；維度要先在任務內頁手動或用 AI 標記過才會顯示出來。</p>
+            </div>
+
             <p className="text-xs text-slate-500 mb-3">使用標題 AI 功能會自動對任務進行分類偵測，或者亦可用手動添加（只有建立者能填寫類別）。</p>
             <div className="space-y-2">
               {DISPLAY_CONTEXTS.map(ctx => (
@@ -4674,7 +5117,7 @@ function ViewModeToggle({ mode, onChange }) {
 // =====================================================================
 // 類別瀏覽：十個分類的方格卡片首頁 + 點進去的分類詳情列表
 // =====================================================================
-function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, onToggleShowAll, emojiOverride }) {
+function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, onToggleShowAll, emojiOverride, applySubDimension, onToggleApplySubDimension }) {
   // 每個分類先算個粗略數量給卡片參考（用預設 0.5 門檻，跟詳情頁預設值一致，純粹給使用者一個大概印象）
   const relevant = missions.filter(m => m.category_scores && (showAll || isRelevantToUser(m, currentUserId)));
   const counts = {};
@@ -4694,10 +5137,16 @@ function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, on
           </button>
         ))}
       </div>
-      <label className="flex items-center justify-center gap-2 text-xs text-slate-500 mt-4">
-        <input type="checkbox" checked={showAll} onChange={e => onToggleShowAll(e.target.checked)} className="w-4 h-4" />
-        顯示與我無關之任務
-      </label>
+      <div className="flex items-center justify-center gap-6 mt-4">
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          <input type="checkbox" checked={showAll} onChange={e => onToggleShowAll(e.target.checked)} className="w-4 h-4" />
+          顯示與我無關之任務
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          <input type="checkbox" checked={applySubDimension} onChange={e => onToggleApplySubDimension(e.target.checked)} className="w-4 h-4" />
+          套用子類別選單
+        </label>
+      </div>
     </div>
   );
 }
@@ -4705,7 +5154,7 @@ function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, on
 const CATEGORY_SORT_MODES = { category_first: "類別分數優先", ...SORT_MODE_LABELS };
 
 function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, visibleColumns, visibleColumnsClosed, visibleSections, onOpen, onBack,
-  projectNameById, hiddenSet, onHide, onUnhide, onDelete, starredSet, onStar, onUnstar, onOpenColumnSettings, showAll }) {
+  projectNameById, hiddenSet, onHide, onUnhide, onDelete, starredSet, onStar, onUnstar, onOpenColumnSettings, showAll, applySubDimension }) {
   const [threshold, setThreshold] = useState(0.5);
   const [sortMode, setSortMode] = useState("category_first");
   const weights = profile.priority_weights;
@@ -4719,11 +5168,35 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
     ? sortMissionsByCategory(list, categoryKey, weights)
     : sortMissions(list, sortMode, weights);
 
-  const groups = [
-    { key: "open", label: "未結案", columnMode: "list", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 0)) },
-    { key: "completed", label: "已完成", columnMode: "closed", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 1)) },
-    { key: "abandoned", label: "已棄置", columnMode: "closed", items: sortWithinTier(relevant.filter(m => statusTier(m.status) === 2)) },
-  ].filter(g => g.items.length > 0 && visibleSections?.[g.key] !== false);
+  // 「工作」分類專用：套用子類別選單時，每個狀態分層底下再依設定的維度細分小節
+  const workSubDimKey = profile.work_sub_dimension || "functional_category";
+  const useSubGrouping = categoryKey === "work" && applySubDimension && workSubDimKey !== "none";
+  function dimensionValueFor(m) {
+    const wd = Array.isArray(m.work_dimensions) ? m.work_dimensions[0] : m.work_dimensions;
+    const v = workSubLabel(workSubDimKey, wd);
+    return v || "未標記";
+  }
+
+  const tierDefs = [
+    { key: "open", label: "未結案", columnMode: "list", tier: 0 },
+    { key: "completed", label: "已完成", columnMode: "closed", tier: 1 },
+    { key: "abandoned", label: "已棄置", columnMode: "closed", tier: 2 },
+  ];
+  const groups = [];
+  tierDefs.forEach(t => {
+    if (visibleSections?.[t.key] === false) return;
+    const tierItems = sortWithinTier(relevant.filter(m => statusTier(m.status) === t.tier));
+    if (tierItems.length === 0) return;
+    if (!useSubGrouping) {
+      groups.push({ key: t.key, label: t.label, columnMode: t.columnMode, items: tierItems });
+      return;
+    }
+    const bySub = {};
+    tierItems.forEach(m => { const v = dimensionValueFor(m); (bySub[v] = bySub[v] || []).push(m); });
+    Object.keys(bySub)
+      .sort((a, b) => (a === "未標記") - (b === "未標記") || a.localeCompare(b))
+      .forEach(v => groups.push({ key: `${t.key}-${v}`, label: `${t.label} · ${v}`, columnMode: t.columnMode, items: bySub[v] }));
+  });
 
   const commonListProps = {
     onOpen, currentUserId,
@@ -4738,6 +5211,7 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
     noProgressColorOverride: profile.no_progress_color_override, noProgressSeverityDays: profile.no_progress_severity_days,
     checklistDisplayMode: profile.checklist_display_mode,
     categoryDisplay: profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES,
+    workSubDimension: profile.work_sub_dimension,
     categoryEmojiOverride: profile.category_emoji_override,
     sortMode, sortHighlightColor: profile.sort_highlight_color, forceShowSortColumn: profile.force_show_sort_column,
     showCategoryColumns: true, categoryKey, projectNameById,
@@ -5326,6 +5800,7 @@ function Dashboard({ session, profile, setProfile }) {
   const [personalViewMode, setPersonalViewMode] = useState("list"); // list | gantt
   const [openCategoryKey, setOpenCategoryKey] = useState(null); // null=十宮格首頁；有值=該分類的詳情列表
   const [categoryShowAll, setCategoryShowAll] = useState(false); // 類別瀏覽「顯示與我無關之任務」開關，預設關閉、不持久化（跟門檻滑桿一樣是當次瀏覽的臨時決定）
+  const [applySubDimension, setApplySubDimension] = useState(true); // 「套用子類別選單」：只影響「工作」分類，預設開啟、不持久化，跟 categoryShowAll 同一種session-only設計
   const [projectViewMode, setProjectViewMode] = useState("list"); // list | gantt
   const [relationFilter, setRelationFilter] = useState(DEFAULT_RELATION_FILTER);
   const [hiddenIds, setHiddenIds] = useState([]);
@@ -5350,7 +5825,7 @@ function Dashboard({ session, profile, setProfile }) {
   const notifRef = useRef(null);
 
   const loadMissions = useCallback(async () => {
-    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), mission_checklist_items(id,is_checked)").order("created_at", { ascending: false });
+    let q = sb.from("missions").select("*, creator:profiles!missions_creator_id_fkey(id,display_name,email), assignee:profiles!missions_assigned_id_fkey(id,display_name,email), mission_checklist_items(id,is_checked), work_dimensions:mission_work_dimensions(*)").order("created_at", { ascending: false });
     const { data } = await q;
     setMissions(data || []);
   }, []);
@@ -5472,6 +5947,7 @@ function Dashboard({ session, profile, setProfile }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_hides" }, () => loadHiddenIds())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_stars" }, () => loadStarredIds())
       .on("postgres_changes", { event: "*", schema: "public", table: "mission_checklist_items" }, () => loadMissions())
+      .on("postgres_changes", { event: "*", schema: "public", table: "mission_work_dimensions" }, () => loadMissions())
       .on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => loadProjects())
       .on("postgres_changes", { event: "*", schema: "public", table: "project_members" }, () => { loadProjects(); loadCurrentProjectMembers(openProjectIdRef.current); loadMyProjectIds(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` }, () => loadNotifs())
@@ -5823,32 +6299,32 @@ function Dashboard({ session, profile, setProfile }) {
             {starredMissions.length > 0 && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{starredMissions.length}）</h3>
-                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                <MissionListView missions={starredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.open && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{openMissions.length}）</h3>
-                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                <MissionListView missions={openMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.completed && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{completedMissions.length}）</h3>
-                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                <MissionListView missions={completedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.abandoned && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{abandonedMissions.length}）</h3>
-                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                <MissionListView missions={abandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
             {visibleSections.hidden && (
               <section>
                 <h3 className="text-sm font-bold text-slate-600 mb-2">被隱藏任務列表（{hiddenMissions.length}）</h3>
                 <p className="text-xs text-slate-400 mb-2">這裡列出你自己隱藏起來的任務（通常是朋友分享給你、但你不想在主要清單看到的任務）。按「取消隱藏」就會回到原本的分類裡。</p>
-                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                <MissionListView missions={hiddenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
               </section>
             )}
           </div>
@@ -6017,25 +6493,25 @@ function Dashboard({ session, profile, setProfile }) {
                 {projectStarredMissions.length > 0 && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">注目任務（{projectStarredMissions.length}）</h3>
-                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                    <MissionListView missions={projectStarredMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.open && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">未結案任務（{projectOpenMissions.length}）</h3>
-                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                    <MissionListView missions={projectOpenMissions} columnOrder={profile.column_order} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumns} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode={sortMode} sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} starredIds={starredSet} onStar={starMission} onUnstar={unstarMission} starOverrideColor={profile.star_override_color} checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.completed && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已完成任務（{projectCompletedMissions.length}）</h3>
-                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                    <MissionListView missions={projectCompletedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
                 {visibleSections.abandoned && (
                   <section>
                     <h3 className="text-sm font-bold text-slate-600 mb-2">已棄置任務（{projectAbandonedMissions.length}）</h3>
-                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} />
+                    <MissionListView missions={projectAbandonedMissions} columnOrder={profile.column_order_closed} onOpen={setOpenMissionId} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} urgencyDisplay={profile.urgency_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} visibleColumns={visibleColumnsClosed} currentUserId={profile.id} hiddenIds={hiddenSet} onHide={hideMission} onUnhide={unhideMission} onDelete={deleteMission} relationDisplayMode={profile.relation_filter_display_list} dueDateDisplayList={profile.due_date_display_list} dueDateColorOverride={profile.due_date_color_override} sortMode="closed_desc" sortHighlightColor={profile.sort_highlight_color} forceShowSortColumn={profile.force_show_sort_column} noProgressColorOverride={profile.no_progress_color_override} noProgressSeverityDays={profile.no_progress_severity_days} columnMode="closed" checklistDisplayMode={profile.checklist_display_mode} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} workSubDimension={profile.work_sub_dimension} categoryEmojiOverride={profile.category_emoji_override} />
                   </section>
                 )}
               </>
@@ -6072,7 +6548,7 @@ function Dashboard({ session, profile, setProfile }) {
         {tab === "category" && (
           <div className="bg-white rounded-2xl shadow p-4 mb-4">
             {openCategoryKey === null ? (
-              <CategoryGridPage missions={visibleMissions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} emojiOverride={profile.category_emoji_override} />
+              <CategoryGridPage missions={visibleMissions} currentUserId={profile.id} onOpenCategory={setOpenCategoryKey} showAll={categoryShowAll} onToggleShowAll={setCategoryShowAll} emojiOverride={profile.category_emoji_override} applySubDimension={applySubDimension} onToggleApplySubDimension={setApplySubDimension} />
             ) : (
               <CategoryDetailPage
                 categoryKey={openCategoryKey} missions={visibleMissions} currentUserId={profile.id} profile={profile}
@@ -6083,6 +6559,7 @@ function Dashboard({ session, profile, setProfile }) {
                 starredSet={starredSet} onStar={starMission} onUnstar={unstarMission}
                 onOpenColumnSettings={() => setColumnSettingsContext("category")}
                 showAll={categoryShowAll}
+                applySubDimension={applySubDimension}
               />
             )}
           </div>
@@ -6220,7 +6697,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} aiBanned={aiBanned}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} workSubDimension={profile.work_sub_dimension} aiBanned={aiBanned}
           isStarred={starredSet.has(openMissionId)} onStar={starMission} onUnstar={unstarMission} onDelete={deleteMission}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
