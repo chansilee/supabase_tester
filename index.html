@@ -1239,6 +1239,19 @@ function sortMissionsByCategory(list, categoryKey, weights) {
 function isRelevantToUser(m, userId) {
   return m.creator_id === userId || m.assigned_id === userId;
 }
+// 搜尋比對共用邏輯：標題/內文/最終評論 + 主分類中文名稱（例如搜「工作」）+ 工作維度的所有值/關鍵字/理由
+// （search_blob 是資料庫 trigger 自動維護好的一段字串，不用在這裡自己組）。
+// 個人任務／專案任務／全域搜尋三個地方都共用這個函式，改一次三邊都同步更新
+function missionMatchesSearch(m, q) {
+  if ((m.title || "").toLowerCase().includes(q)) return true;
+  if ((m.content || "").toLowerCase().includes(q)) return true;
+  if ((m.final_comment || "").toLowerCase().includes(q)) return true;
+  const categoryLabel = m.primary_category && AI_CATEGORY_LABELS[m.primary_category];
+  if (categoryLabel && categoryLabel.toLowerCase().includes(q)) return true;
+  const workDim = Array.isArray(m.work_dimensions) ? m.work_dimensions[0] : m.work_dimensions;
+  if (workDim && workDim.search_blob && workDim.search_blob.toLowerCase().includes(q)) return true;
+  return false;
+}
 function primaryCategoryOf(scores) {
   if (!scores) return null;
   let best = null, bestScore = -1;
@@ -1447,11 +1460,11 @@ function AuthScreen() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-8">
         <h1 className="text-2xl font-bold text-slate-800 mb-1">任務雲 TaskCloud</h1>
-        <p className="text-sm text-slate-500 mb-6">多人共享任務管理系統（測試前端）</p>
+        <p className="text-sm text-slate-500 mb-6">多人共享任務管理系統</p>
         {mode !== "forgot" && (
           <div className="flex mb-6 rounded-lg bg-slate-100 p-1 text-sm font-medium">
-            <button onClick={() => { setMode("login"); setMsg(null); }} className={"flex-1 py-1.5 rounded-md " + (mode === "login" ? "bg-white shadow text-slate-900" : "text-slate-500")}>登入</button>
-            <button onClick={() => { setMode("register"); setMsg(null); }} className={"flex-1 py-1.5 rounded-md " + (mode === "register" ? "bg-white shadow text-slate-900" : "text-slate-500")}>註冊</button>
+            <button onClick={() => { setMode("login"); setMsg(null); }} className={"flex-1 py-1.5 rounded-md text-center " + (mode === "login" ? "bg-white shadow text-slate-900" : "text-slate-500")}>登入</button>
+            <button onClick={() => { setMode("register"); setMsg(null); }} className={"flex-1 py-1.5 rounded-md text-center " + (mode === "register" ? "bg-white shadow text-slate-900" : "text-slate-500")}>註冊</button>
           </div>
         )}
         {mode === "forgot" && (
@@ -1479,11 +1492,11 @@ function AuthScreen() {
           {msg && (
             <div className={"text-xs rounded-lg px-3 py-2 " + (msg.type === "err" ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-700")}>{msg.text}</div>
           )}
-          <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+          <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center disabled:opacity-50">
             {busy ? "處理中…" : (mode === "login" ? "登入" : mode === "register" ? "註冊" : "傳送重設密碼信")}
           </button>
           {mode === "forgot" && (
-            <button type="button" onClick={() => { setMode("login"); setMsg(null); }} className="w-full text-xs text-slate-500 underline">返回登入</button>
+            <button type="button" onClick={() => { setMode("login"); setMsg(null); }} className="w-full text-xs text-slate-500 underline text-center">返回登入</button>
           )}
         </form>
         {!sb && (
@@ -1529,7 +1542,7 @@ function ResetPasswordScreen({ onDone }) {
         {done ? (
           <div>
             <p className="text-sm text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 mt-4">密碼已更新成功，請用新密碼重新登入。</p>
-            <button onClick={onDone} className="w-full mt-4 bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium">前往登入</button>
+            <button onClick={onDone} className="w-full mt-4 bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center">前往登入</button>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-3 mt-4">
@@ -1544,7 +1557,7 @@ function ResetPasswordScreen({ onDone }) {
                 className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
             </div>
             {msg && <div className={"text-xs rounded-lg px-3 py-2 " + (msg.type === "err" ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-700")}>{msg.text}</div>}
-            <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">{busy ? "更新中…" : "更新密碼"}</button>
+            <button disabled={busy} className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium text-center disabled:opacity-50">{busy ? "更新中…" : "更新密碼"}</button>
           </form>
         )}
       </div>
@@ -5277,7 +5290,7 @@ function GlobalSearchList({ missions, onOpen, projectNameById, hasSearched }) {
         <thead className="bg-slate-50 text-slate-500 text-xs">
           <tr>
             <th className="px-4 py-2 text-left font-medium">任務名稱</th>
-            <th className="px-4 py-2 text-left font-medium">任務狀態</th>
+            <th className="px-4 py-2 text-left font-medium">狀態</th>
             <th className="px-4 py-2 text-left font-medium">來源</th>
           </tr>
         </thead>
@@ -5285,7 +5298,9 @@ function GlobalSearchList({ missions, onOpen, projectNameById, hasSearched }) {
           {missions.map(m => (
             <tr key={m.id} onClick={() => onOpen(m.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
               <td className="px-4 py-2.5">{m.title}</td>
-              <td className="px-4 py-2.5 text-slate-500">{STATUS_LABEL[m.status] || m.status}</td>
+              <td className="px-4 py-2.5">
+                <span className={"text-xs px-2 py-0.5 rounded-full font-medium " + STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status] || m.status}</span>
+              </td>
               <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{m.project_id ? (projectNameById?.[m.project_id] || "專案任務") : "個人任務"}</td>
             </tr>
           ))}
@@ -6031,10 +6046,7 @@ function Dashboard({ session, profile, setProfile }) {
   const searchedMissions = appliedSearch
     ? relationFilteredPersonal.filter(m => {
         const q = appliedSearch.toLowerCase();
-        return (m.title || "").toLowerCase().includes(q)
-          || (m.content || "").toLowerCase().includes(q)
-          || (m.final_comment || "").toLowerCase().includes(q)
-          || searchMatchedUpdateMissionIds.includes(m.id);
+        return missionMatchesSearch(m, q) || searchMatchedUpdateMissionIds.includes(m.id);
       })
     : relationFilteredPersonal;
 
@@ -6063,10 +6075,7 @@ function Dashboard({ session, profile, setProfile }) {
   const projectSearchedMissions = appliedSearch
     ? projectMissionsFiltered.filter(m => {
         const q = appliedSearch.toLowerCase();
-        return (m.title || "").toLowerCase().includes(q)
-          || (m.content || "").toLowerCase().includes(q)
-          || (m.final_comment || "").toLowerCase().includes(q)
-          || searchMatchedUpdateMissionIds.includes(m.id);
+        return missionMatchesSearch(m, q) || searchMatchedUpdateMissionIds.includes(m.id);
       })
     : projectMissionsFiltered;
   const projectAllMissions = sortMissions(projectSearchedMissions, sortMode, profile.priority_weights);
@@ -6112,10 +6121,7 @@ function Dashboard({ session, profile, setProfile }) {
   const globalSearchedMissions = globalAppliedSearch
     ? visibleMissions.filter(m => {
         const q = globalAppliedSearch.toLowerCase();
-        return (m.title || "").toLowerCase().includes(q)
-          || (m.content || "").toLowerCase().includes(q)
-          || (m.final_comment || "").toLowerCase().includes(q)
-          || globalSearchMatchedUpdateMissionIds.includes(m.id);
+        return missionMatchesSearch(m, q) || globalSearchMatchedUpdateMissionIds.includes(m.id);
       })
     : [];
   const globalSortedMissions = sortMissions(globalSearchedMissions, sortMode, profile.priority_weights);
