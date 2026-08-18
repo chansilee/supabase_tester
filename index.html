@@ -1239,6 +1239,11 @@ function sortMissionsByCategory(list, categoryKey, weights) {
 function isRelevantToUser(m, userId) {
   return m.creator_id === userId || m.assigned_id === userId;
 }
+// AI 呼叫前的資訊量門檻：標題空白或去頭尾空白後 <=5 個字元（中英文數字符號都算一個字元），
+// 先在前端擋下來，不要讓 AI 有機會被觸發浪費 token 跟額度
+function isTitleTooShortForAi(title) {
+  return !title || title.trim().length <= 5;
+}
 // 搜尋比對共用邏輯：標題/內文/最終評論 + 主分類中文名稱（例如搜「工作」）+ 工作維度的所有值/關鍵字/理由
 // （search_blob 是資料庫 trigger 自動維護好的一段字串，不用在這裡自己組）。
 // 個人任務／專案任務／全域搜尋三個地方都共用這個函式，改一次三邊都同步更新
@@ -1361,13 +1366,13 @@ const AI_QUOTA_ERROR_TITLES = {
   AI_UNAVAILABLE: "功能暫時無法使用",
 };
 
-async function callAiRecognize(title) {
+async function callAiRecognize(title, content) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { const e = new Error("請重新登入後再試"); e.code = "UNAUTHENTICATED"; throw e; }
   const resp = await fetch(`${SUPABASE_URL}/functions/v1/ai-recognize`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, content }),
   });
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok) {
@@ -1604,6 +1609,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [workAiErr, setWorkAiErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [aiInsufficientModal, setAiInsufficientModal] = useState(false); // 標題資訊量不足時擋下 AI 呼叫，兩個 AI 按鈕共用同一個提示彈窗
 
   // 任務規模自動判定：只要左欄任一項目有結構化細節，且使用者沒有明確鎖住手動，就自動接管
   useEffect(() => {
@@ -1657,9 +1663,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 
   async function runAiRecognize() {
     if (!title.trim()) return;
+    if (isTitleTooShortForAi(title)) { setAiInsufficientModal(true); return; }
     setAiBusy(true); setAiErr(null); setAiErrCode(null);
     try {
-      const result = await callAiRecognize(title.trim());
+      const result = await callAiRecognize(title.trim(), content);
       setAiCategoryScores(result.category_scores);
       setAiSuggestions((result.subtasks || []).map((s, i) => ({ ...s, _key: `ai-${Date.now()}-${i}` })));
       if (result.extracted_deadline_date) {
@@ -1698,6 +1705,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     setWorkDimFromAi(false); // 手動改過就不算是純 AI 結果了
   }
   async function runWorkDimAi() {
+    if (isTitleTooShortForAi(title)) { setAiInsufficientModal(true); return; }
     setWorkAiBusy(true); setWorkAiErr(null);
     try {
       const result = await callAiWorkDimensions(title, content);
@@ -2039,6 +2047,15 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         onCancel={() => setAiQuotaModal(null)}
       />
     )}
+    {aiInsufficientModal && (
+      <ConfirmModal
+        title="資訊不足"
+        message="任務資訊不足，請嘗試輸入更多資訊以供辨識！"
+        confirmLabel="知道了" hideCancel
+        onConfirm={() => setAiInsufficientModal(false)}
+        onCancel={() => setAiInsufficientModal(false)}
+      />
+    )}
     </>
   );
 }
@@ -2123,6 +2140,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [workDimErr, setWorkDimErr] = useState(null);
   const [workAiBusy, setWorkAiBusy] = useState(false);
   const [workAiErr, setWorkAiErr] = useState(null);
+  const [aiInsufficientModal, setAiInsufficientModal] = useState(false); // 標題資訊量不足時擋下 AI 呼叫，兩個 AI 按鈕共用同一個提示彈窗
 
   const load = useCallback(async () => {
     const [missionRes, updatesRes, checklistRes] = await Promise.all([
@@ -2427,6 +2445,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     }
   }
   async function runWorkDimAi() {
+    if (isTitleTooShortForAi(mission.title)) { setAiInsufficientModal(true); return; }
     setWorkAiBusy(true); setWorkAiErr(null);
     try {
       const result = await callAiWorkDimensions(mission.title, mission.content || "");
@@ -2450,9 +2469,10 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   // 需要使用者在自繪 ConfirmModal 二次確認才覆蓋；scale 交給既有的自動判定 effect 處理，不需額外確認。
   async function rerunAiRecognize() {
     if (!editTitle.trim()) return;
+    if (isTitleTooShortForAi(editTitle)) { setAiInsufficientModal(true); return; }
     setAiBusy(true); setAiErr(null); setAiErrCode(null);
     try {
-      const result = await callAiRecognize(editTitle.trim());
+      const result = await callAiRecognize(editTitle.trim(), editContent);
       if (mission.category_scores) {
         // 之前已經有分類設定（不論是 AI 判斷過還是使用者手動設的），重新辨識不能無聲蓋掉，要讓使用者決定
         setConfirmCategoryOverwrite(result.category_scores);
@@ -3011,6 +3031,15 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             confirmLabel="知道了" hideCancel
             onConfirm={() => setAiQuotaModal(null)}
             onCancel={() => setAiQuotaModal(null)}
+          />
+        )}
+        {aiInsufficientModal && (
+          <ConfirmModal
+            title="資訊不足"
+            message="任務資訊不足，請嘗試輸入更多資訊以供辨識！"
+            confirmLabel="知道了" hideCancel
+            onConfirm={() => setAiInsufficientModal(false)}
+            onCancel={() => setAiInsufficientModal(false)}
           />
         )}
 
