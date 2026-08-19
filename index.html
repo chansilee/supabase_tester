@@ -443,6 +443,10 @@ table { border-collapse: collapse; width: 100%; }
   .modal-confirm-in { animation: modalConfirmIn 320ms ease-out both; }
   .modal-confirm-out { animation: modalConfirmOut 200ms ease-in both; }
 
+  /* 檢查清單雙欄：AI 建議欄從右側滑入/滑出，決定的子任務欄同步伸縮，兩欄都用固定的
+     flex-basis + transition 做，不用 JS 量測（目標寬度是固定的 0%/50%/100%，不是內容決定的） */
+  .checklist-col-anim { flex-grow: 0; flex-shrink: 0; min-width: 0; transition: flex-basis 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease; }
+
   /* 分類 emoji：維持原本色彩，不做任何濾鏡調整 */
   .category-emoji-mono {}
 
@@ -459,7 +463,7 @@ table { border-collapse: collapse; width: 100%; }
 <div id="root"></div>
 
 <script type="text/plain" id="app-source">
-const { useState, useEffect, useMemo, useCallback, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } = React;
 
 // =====================================================================
 // 彈窗開啟/關閉動畫的共用機制
@@ -502,6 +506,61 @@ function useConfirmModalAnimation() {
     setTimeout(afterClose, 200);
   }
   return { closing, className: closing ? "modal-confirm-out" : "modal-confirm-in", requestClose };
+}
+
+// 展開/收合動畫：用 JS 量測內容實際高度（scrollHeight），對 height 屬性做 transition
+// （cubic-bezier(0.4,0,0.2,1)，Material Design 標準曲線，先加速後減速），
+// 展開完成後把 height 切回 auto，這樣裡面的輸入欄位/文字/按鈕都能正常互動，內容之後變高也不會被卡住。
+// 不只處理單純的「顯示/隱藏」，也處理「兩種不同內容互換」（例如按鈕列 <-> 表單）：
+// switchKey 改變時才會跑動畫，同一個 key 底下內容自己變化（例如打字）不會誤觸發。
+// 回傳一個 ref，掛在包住內容的那個 wrapper div 上即可，不用額外處理 style。
+function useAnimatedHeight(switchKey) {
+  const wrapRef = useRef(null);
+  const prevKeyRef = useRef(switchKey);
+  const prevHeightRef = useRef(null);
+  const timerRef = useRef(null);
+  const rafRef1 = useRef(null);
+  const rafRef2 = useRef(null);
+
+  function clearPending() {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (rafRef1.current) { cancelAnimationFrame(rafRef1.current); rafRef1.current = null; }
+    if (rafRef2.current) { cancelAnimationFrame(rafRef2.current); rafRef2.current = null; }
+  }
+
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (el) {
+      el.style.overflow = "hidden";
+      if (prevKeyRef.current !== switchKey) {
+        const startH = prevHeightRef.current;
+        const endH = el.scrollHeight;
+        clearPending();
+        if (startH != null) {
+          el.style.transition = "none";
+          el.style.height = startH + "px";
+          // 用兩層 requestAnimationFrame 取代單純強制 reflow（getBoundingClientRect）——
+          // 連續快速切換好幾次時，單一次同步強制 reflow 不一定可靠地讓瀏覽器先畫完「起始高度、
+          // 無 transition」這一幀，可能被瀏覽器合併掉，導致 transition 沒被觸發、直接跳到終值。
+          // 雙層 rAF 確保「無 transition 設定起始值」真的先完成繪製，下一幀才切換成「有 transition
+          // 設定目標值」，這是業界處理這類重複觸發轉場問題的標準做法。
+          rafRef1.current = requestAnimationFrame(() => {
+            rafRef2.current = requestAnimationFrame(() => {
+              el.style.transition = "height 300ms cubic-bezier(0.4, 0, 0.2, 1)";
+              el.style.height = endH + "px";
+              timerRef.current = setTimeout(() => { el.style.height = "auto"; }, 300);
+            });
+          });
+        }
+        prevKeyRef.current = switchKey;
+      }
+      prevHeightRef.current = el.scrollHeight; // 每次 render 完都存一份目前高度，供「下一次」切換時當動畫起點
+    }
+  });
+
+  useEffect(() => () => clearPending(), []);
+
+  return wrapRef;
 }
 
 
@@ -1659,6 +1718,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [title, setTitle] = useState(initialTitle || "");
   const [content, setContent] = useState(initialContent || "");
   const [contentOpen, setContentOpen] = useState(!!initialContent); // 有帶入初始內容（例如從靈感升級而來）時，預設直接展開讓使用者看得到
+  const contentAnimRef = useAnimatedHeight(contentOpen);
   const [dueDate, setDueDate] = useState(""); // YYYY-MM-DD
   const [dueTime, setDueTime] = useState(""); // HH:MM，留空代表沒有精確時刻
   const [priority, setPriority] = useState("P2");
@@ -1680,6 +1740,8 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [categoryDraft, setCategoryDraft] = useState([]);
   // 「工作」六個管理學維度：新增任務時還沒有 mission_id，先存本地草稿，等任務建立成功後才真的寫進資料庫
   const [workDimOpen, setWorkDimOpen] = useState(false);
+  const categoryAnimRef = useAnimatedHeight(categoryOpen);
+  const workDimAnimRef = useAnimatedHeight(workDimOpen);
   const [workDimDraft, setWorkDimDraft] = useState({});
   const [workDimFromAi, setWorkDimFromAi] = useState(false);
   const [workAiBusy, setWorkAiBusy] = useState(false);
@@ -1873,11 +1935,13 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
               </button>
               {!contentOpen && content && <span className="text-xs text-slate-400">（已填寫，點「+」查看）</span>}
             </div>
-            {contentOpen && (
-              <textarea rows={4} value={content} onChange={e => setContent(e.target.value)}
-                placeholder="（任務內容文字描述，可留空）"
-                className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-            )}
+            <div ref={contentAnimRef}>
+              {contentOpen && (
+                <textarea rows={5} value={content} onChange={e => setContent(e.target.value)}
+                  placeholder="（任務內容文字描述，可留空）"
+                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+              )}
+            </div>
           </div>
 
           <div>
@@ -1888,25 +1952,27 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                 <Icon.Search className="w-3.5 h-3.5" />
               </button>
             </div>
-            {categoryOpen && (
-              <div className="mt-2 bg-slate-50 rounded-lg p-3">
-                {!categoryEditing ? (
-                  <>
-                    <CategoryBreakdown scores={aiCategoryScores} />
-                    <button type="button" onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs text-slate-500 mb-1">選擇分類（可複選，選多個會自動平分權重，都不選就是「未分類」）</p>
-                    <CategoryMultiSelect selected={categoryDraft} onToggle={toggleCategoryDraft} />
-                    <div className="flex gap-2 mt-2">
-                      <button type="button" onClick={saveCategoryEdit} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">套用</button>
-                      <button type="button" onClick={() => setCategoryEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            <div ref={categoryAnimRef}>
+              {categoryOpen && (
+                <div className="mt-2 bg-slate-50 rounded-lg p-3">
+                  {!categoryEditing ? (
+                    <>
+                      <CategoryBreakdown scores={aiCategoryScores} />
+                      <button type="button" onClick={startCategoryEdit} className="mt-2 text-xs text-slate-400 hover:text-slate-600">✏️ 手動設定分類</button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-slate-500 mb-1">選擇分類（可複選，選多個會自動平分權重，都不選就是「未分類」）</p>
+                      <CategoryMultiSelect selected={categoryDraft} onToggle={toggleCategoryDraft} />
+                      <div className="flex gap-2 mt-2">
+                        <button type="button" onClick={saveCategoryEdit} className="bg-slate-900 text-white text-xs rounded-lg px-3 py-1.5">套用</button>
+                        <button type="button" onClick={() => setCategoryEditing(false)} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {(aiCategoryScores ? primaryCategoryOf(aiCategoryScores) : null) === "work" && (
@@ -1918,7 +1984,8 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                   <Icon.Search className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {workDimOpen && (
+              <div ref={workDimAnimRef}>
+                {workDimOpen && (
                 <div className="mt-2 bg-slate-50 rounded-lg p-3">
                   <div className="flex items-center gap-3 mb-2">
                     <button type="button" onClick={runWorkDimAi} disabled={workAiBusy || aiBanned}
@@ -1953,14 +2020,15 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                   {workDimDraft.rationale && <p className="text-xs text-slate-400 mt-2">理由：{workDimDraft.rationale}</p>}
                 </div>
               )}
+              </div>
             </div>
           )}
 
           <div className="border-t border-slate-200 pt-3">
             <label className="text-xs text-slate-500">{fieldLabelPrefix}檢查清單</label>
-            <div className="grid grid-cols-2 gap-3 mt-2">
+            <div className="flex gap-3 mt-2">
               {/* 左欄：決定的子任務 */}
-              <div>
+              <div className="checklist-col-anim" style={{ flexBasis: aiSuggestions.length > 0 ? "calc(50% - 0.375rem)" : "100%" }}>
                 <p className="text-xs font-semibold text-slate-500 mb-1.5">決定的子任務</p>
                 <div className="space-y-1.5 min-h-[2rem]">
                   {checklistDraft.map((it, i) => {
@@ -2036,8 +2104,8 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                 </div>
               </div>
               {/* 右欄：AI 建議 */}
-              <div>
-                <p className="text-xs font-semibold text-slate-500 mb-1.5">AI 建議</p>
+              <div className="checklist-col-anim" style={{ flexBasis: aiSuggestions.length > 0 ? "calc(50% - 0.375rem)" : "0%", opacity: aiSuggestions.length > 0 ? 1 : 0, overflow: "hidden" }}>
+                <p className="text-xs font-semibold text-slate-500 mb-1.5 whitespace-nowrap">AI 建議</p>
                 <div className="space-y-1.5 min-h-[2rem]">
                   {aiSuggestions.length === 0 && <p className="text-xs text-slate-300 px-1">按上方「✨ AI 辨識」會在這裡列出建議</p>}
                   {aiSuggestions.map(s => (
@@ -2172,14 +2240,20 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [checklistErr, setChecklistErr] = useState(null);
   const [projectMembers, setProjectMembers] = useState([]);
   const [replyText, setReplyText] = useState("");
+  // 「更新任務」文字框：一開始只有 2 行，點進去（focus）就展開到 5 行，
+  // 之後除了整個彈窗關閉，不會再縮回原本行數（一旦展開只加不減）
+  const [replyExpanded, setReplyExpanded] = useState(false);
+  const replyAnimRef = useAnimatedHeight(replyExpanded);
   const [finalComment, setFinalComment] = useState("");
   const [waitingReasonInput, setWaitingReasonInput] = useState("");
   const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
+  const statusFooterAnimRef = useAnimatedHeight(pendingStatus === null ? "buttons" : "form");
   const [statusChangeErr, setStatusChangeErr] = useState(null); // 狀態切換專用的錯誤訊息，跟通用的 err 分開，就近顯示在「確認切換」旁邊
   const [editingBody, setEditingBody] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editContentOpen, setEditContentOpen] = useState(false);
+  const editContentAnimRef = useAnimatedHeight(editContentOpen);
   const [editDue, setEditDue] = useState("");
   const [editDueTime, setEditDueTime] = useState("");
   const [editPriority, setEditPriority] = useState("P2");
@@ -2205,12 +2279,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [confirmDeadlineOverwrite, setConfirmDeadlineOverwrite] = useState(null); // { date, time }
   const [confirmCategoryOverwrite, setConfirmCategoryOverwrite] = useState(null); // 新的 category_scores，待確認是否覆蓋舊設定
   const [categoryOpen, setCategoryOpen] = useState(false); // 「任務類別」區塊收合狀態
+  const categoryAnimRef = useAnimatedHeight(categoryOpen);
   const [categoryEditing, setCategoryEditing] = useState(false); // 是否進入手動分類編輯
   const [categoryDraft, setCategoryDraft] = useState([]); // 手動分類編輯中的多選草稿
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryErr, setCategoryErr] = useState(null);
   // 「工作」分類專用的六個管理學維度：手動編輯 + AI 標記共用同一組草稿狀態
   const [workDimOpen, setWorkDimOpen] = useState(false);
+  const workDimAnimRef = useAnimatedHeight(workDimOpen);
   const [workDimEditing, setWorkDimEditing] = useState(false);
   const [workDimDraft, setWorkDimDraft] = useState({});
   const [workDimBusy, setWorkDimBusy] = useState(false);
@@ -2768,7 +2844,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   <Icon.Search className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {categoryOpen && (
+              <div ref={categoryAnimRef}>
+                {categoryOpen && (
                 <div className="mt-2 bg-slate-50 rounded-lg p-3">
                   {!categoryEditing ? (
                     <>
@@ -2790,6 +2867,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   )}
                 </div>
               )}
+              </div>
             </div>
             {mission.primary_category === "work" && (
               <div className="text-xs text-slate-500 mb-3">
@@ -2800,6 +2878,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     <Icon.Search className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                <div ref={workDimAnimRef}>
                 {workDimOpen && (
                   <div className="mt-2 bg-slate-50 rounded-lg p-3">
                     {!workDimEditing ? (
@@ -2871,6 +2950,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     )}
                   </div>
                 )}
+                </div>
               </div>
             )}
             <div className="text-xs text-slate-400 mb-3">
@@ -2900,11 +2980,13 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </button>
                 {!editContentOpen && editContent && <span className="text-xs text-slate-400">（已填寫，點「+」查看）</span>}
               </div>
-              {editContentOpen && (
-                <textarea rows={4} value={editContent} onChange={e => setEditContent(e.target.value)}
-                  placeholder="（任務內容文字描述，可留空）"
-                  className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              )}
+              <div ref={editContentAnimRef}>
+                {editContentOpen && (
+                  <textarea rows={5} value={editContent} onChange={e => setEditContent(e.target.value)}
+                    placeholder="（任務內容文字描述，可留空）"
+                    className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                )}
+              </div>
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -2917,6 +2999,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   <Icon.Search className="w-3.5 h-3.5" />
                 </button>
               </div>
+              <div ref={categoryAnimRef}>
               {categoryOpen && (
                 <div className="mt-2 bg-slate-50 rounded-lg p-3">
                   {!categoryEditing ? (
@@ -2937,6 +3020,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   )}
                 </div>
               )}
+              </div>
             </div>
             {(aiCategoryScores !== null ? primaryCategoryOf(aiCategoryScores) : mission.primary_category) === "work" && (
               <div>
@@ -2947,6 +3031,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     <Icon.Search className="w-3.5 h-3.5" />
                   </button>
                 </div>
+              <div ref={workDimAnimRef}>
                 {workDimOpen && (
                   <div className="mt-2 bg-slate-50 rounded-lg p-3">
                     {!workDimEditing ? (
@@ -3019,7 +3104,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   </div>
                 )}
               </div>
-            )}
+            </div>
+          )}
             <div>
               <label className="text-xs text-slate-500">{fieldLabelPrefix}重要性</label>
               <div className="flex gap-2 mt-1">
@@ -3156,8 +3242,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </div>
               </div>
             )}
-            <div className={aiSuggestions.length > 0 ? "grid grid-cols-2 gap-3" : ""}>
-              <div>
+            <div className="flex gap-3">
+              <div className="checklist-col-anim" style={{ flexBasis: aiSuggestions.length > 0 ? "calc(50% - 0.375rem)" : "100%" }}>
                 {aiSuggestions.length > 0 && <p className="text-xs font-semibold text-slate-500 mb-1.5">目前的檢查清單</p>}
                 <div className="space-y-1.5">
                   {checklist.map((item, index) => {
@@ -3262,28 +3348,26 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   </form>
                 )}
               </div>
-              {aiSuggestions.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-xs font-semibold text-slate-500">✨ AI 建議</p>
-                    <button type="button" onClick={() => setAiSuggestions([])} className="text-xs text-slate-400 hover:text-slate-600">清空建議</button>
-                  </div>
-                  <div className="space-y-1.5">
-                    {aiSuggestions.map(s => (
-                      <div key={s._key} className="flex items-center gap-1.5 bg-violet-50 rounded-lg px-2.5 py-1.5">
-                        <button type="button" onClick={() => importAiSuggestion(s)} title="匯入左欄" className="shrink-0 text-violet-600 hover:text-violet-800 font-bold">←</button>
-                        <span className="flex-1 text-sm text-slate-700">{s.title}</span>
-                        <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">
-                          {s.estimated_minutes || 0}分{s.requires_travel ? " 🚗" : ""}{s.wait_days_after ? ` ⏳${s.wait_days_after}天` : ""}
-                        </span>
-                        <button type="button" onClick={() => discardSuggestion(s._key)} title="移除建議（不匯入）" className="shrink-0 text-slate-400 hover:text-rose-500">
-                          <Icon.Trash className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+              <div className="checklist-col-anim" style={{ flexBasis: aiSuggestions.length > 0 ? "calc(50% - 0.375rem)" : "0%", opacity: aiSuggestions.length > 0 ? 1 : 0, overflow: "hidden" }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-slate-500 whitespace-nowrap">✨ AI 建議</p>
+                  <button type="button" onClick={() => setAiSuggestions([])} className="text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap">清空建議</button>
                 </div>
-              )}
+                <div className="space-y-1.5">
+                  {aiSuggestions.map(s => (
+                    <div key={s._key} className="flex items-center gap-1.5 bg-violet-50 rounded-lg px-2.5 py-1.5">
+                      <button type="button" onClick={() => importAiSuggestion(s)} title="匯入左欄" className="shrink-0 text-violet-600 hover:text-violet-800 font-bold">←</button>
+                      <span className="flex-1 text-sm text-slate-700">{s.title}</span>
+                      <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">
+                        {s.estimated_minutes || 0}分{s.requires_travel ? " 🚗" : ""}{s.wait_days_after ? ` ⏳${s.wait_days_after}天` : ""}
+                      </span>
+                      <button type="button" onClick={() => discardSuggestion(s._key)} title="移除建議（不匯入）" className="shrink-0 text-slate-400 hover:text-rose-500">
+                        <Icon.Trash className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             {checklistErr && <p className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-2">{checklistErr}</p>}
           </div>
@@ -3381,8 +3465,11 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         {canReply && (
           <form onSubmit={submitReply} className="mt-4 border-t border-slate-200 pt-3">
             <label className="text-xs text-slate-500">{fieldLabelPrefix}更新任務</label>
-            <textarea required rows={2} value={replyText} onChange={e => setReplyText(e.target.value)}
-              placeholder="輸入更新內容…" className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            <div ref={replyAnimRef}>
+              <textarea required rows={replyExpanded ? 5 : 2} value={replyText} onChange={e => setReplyText(e.target.value)}
+                onFocus={() => setReplyExpanded(true)}
+                placeholder="輸入更新內容…" className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
             <button disabled={busy} className="mt-2 bg-blue-600 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">送出更新</button>
           </form>
         )}
@@ -3390,6 +3477,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 
         {(isCreator || isAssignee) && (mission.status === "added" || mission.status === "in_progress" || mission.status === "waiting") && (
           <div className="border-t border-slate-200 px-6 py-3 shrink-0">
+            <div ref={statusFooterAnimRef}>
             {!pendingStatus ? (
               <div className="flex gap-2">
                 {isCreator && (
@@ -3418,6 +3506,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </div>
               </div>
             )}
+            </div>
           </div>
         )}
       </div>
@@ -5749,6 +5838,7 @@ const BUG_REPORT_STATUS_LABEL = { open: "未處理", reviewed: "已查看", reso
 const BUG_REPORT_STATUS_COLOR = { open: "bg-rose-100 text-rose-700", reviewed: "bg-amber-100 text-amber-700", resolved: "bg-emerald-100 text-emerald-700" };
 
 function MemberRoleModal({ role, currentUserId, onClose }) {
+  const { className: roleModalClassName, requestClose: requestCloseRoleModal } = useConfirmModalAnimation();
   const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
@@ -5789,10 +5879,10 @@ function MemberRoleModal({ role, currentUserId, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col " + roleModalClassName}>
         <div className="flex justify-between items-center p-6 pb-4">
           <h2 className="text-lg font-bold">會員等級與限制</h2>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          <button onClick={() => requestCloseRoleModal(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
 
         <div className="px-6 pb-6 overflow-y-auto flex-1">
