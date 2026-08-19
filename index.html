@@ -412,6 +412,37 @@ table { border-collapse: collapse; width: 100%; }
     animation: ai-thinking-rotate 0.8s linear infinite;
   }
 
+  /* =====================================================================
+     彈窗動畫：模式一「彈出/彈回」給主要內容彈窗（新增任務/新增專案/新增子任務/任務內頁）用，
+     從觸發按鈕當下座標長出來；模式二「快速淡入+輕晃定位」給二次確認類彈窗用，固定在畫面中央。
+     兩者都只用 transform + opacity，不動 width/height/top/left。
+     ===================================================================== */
+  @keyframes modalPopIn {
+    0%   { transform: translate(var(--ox, 0px), var(--oy, 0px)) scale(0.05); opacity: 0; }
+    72%  { transform: translate(0, 0) scale(1.06); opacity: 1; }
+    88%  { transform: translate(0, 0) scale(0.985); opacity: 1; }
+    100% { transform: translate(0, 0) scale(1); opacity: 1; }
+  }
+  @keyframes modalPopOut {
+    0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+    100% { transform: translate(var(--ox, 0px), var(--oy, 0px)) scale(0.05); opacity: 0; }
+  }
+  .modal-pop-in { animation: modalPopIn 560ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+  .modal-pop-out { animation: modalPopOut 380ms cubic-bezier(0.5, 0, 0.75, 0) both; }
+
+  @keyframes modalConfirmIn {
+    0%   { transform: scale(0.9) translateY(-8px); opacity: 0; }
+    40%  { transform: scale(1.035) translateY(2px); opacity: 1; }
+    70%  { transform: scale(0.99) translateY(-1px); opacity: 1; }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  @keyframes modalConfirmOut {
+    0%   { transform: scale(1) translateY(0); opacity: 1; }
+    100% { transform: scale(0.95) translateY(-4px); opacity: 0; }
+  }
+  .modal-confirm-in { animation: modalConfirmIn 320ms ease-out both; }
+  .modal-confirm-out { animation: modalConfirmOut 200ms ease-in both; }
+
   /* 分類 emoji：維持原本色彩，不做任何濾鏡調整 */
   .category-emoji-mono {}
 
@@ -429,6 +460,50 @@ table { border-collapse: collapse; width: 100%; }
 
 <script type="text/plain" id="app-source">
 const { useState, useEffect, useMemo, useCallback, useRef } = React;
+
+// =====================================================================
+// 彈窗開啟/關閉動畫的共用機制
+// =====================================================================
+// 全域記錄「最後一次點擊的座標」（capture 階段，比任何 React onClick 都早執行）。
+// 這樣模式一彈窗要從觸發按鈕的位置長出來時，不用在每一個觸發按鈕（新增任務、任務列表每一列、
+// 甘特圖、通知、全域搜尋結果...到處都是）分別把座標傳進去，開啟當下直接讀這個全域值就好，
+// 涵蓋範圍最大、也最不容易漏掉某個入口忘記接動畫。
+let __lastClickX = null, __lastClickY = null;
+if (typeof document !== "undefined") {
+  document.addEventListener("click", e => { __lastClickX = e.clientX; __lastClickY = e.clientY; }, true);
+}
+
+// 模式一：從觸發按鈕位置「彈出/彈回」。用在新增任務／新增專案／新增子任務／任務內頁這類主要內容彈窗。
+// 回傳 closing（是否正在播放關閉動畫）、style（要 spread 到彈窗最外層 div 的位移量 CSS 變數）、
+// className（目前該套用開啟或關閉動畫的 class）、requestClose（取代直接呼叫關閉/送出成功後的邏輯：
+// 先播完 380ms 的關閉動畫才真的執行，動畫播放期間會鎖住、呼叫第二次不會有作用，避免重複觸發關閉）
+function usePopModalAnimation() {
+  const [closing, setClosing] = useState(false);
+  const originRef = useRef(null);
+  if (originRef.current === null) {
+    const cx = __lastClickX ?? window.innerWidth / 2;
+    const cy = __lastClickY ?? window.innerHeight / 2;
+    originRef.current = { "--ox": `${cx - window.innerWidth / 2}px`, "--oy": `${cy - window.innerHeight / 2}px` };
+  }
+  function requestClose(afterClose) {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(afterClose, 380);
+  }
+  return { closing, style: originRef.current, className: closing ? "modal-pop-out" : "modal-pop-in", requestClose };
+}
+
+// 模式二：固定在畫面中央，快速淡入＋輕晃定位。用在需要二次確認的 ConfirmModal。
+function useConfirmModalAnimation() {
+  const [closing, setClosing] = useState(false);
+  function requestClose(afterClose) {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(afterClose, 200);
+  }
+  return { closing, className: closing ? "modal-confirm-out" : "modal-confirm-in", requestClose };
+}
+
 
 // =====================================================================
 // 設定區：請填入你自己 Supabase 專案的值（Project Settings > API）
@@ -513,14 +588,15 @@ const DEFAULT_VISIBLE_SECTIONS = TASK_SECTIONS.reduce((acc, s) => { acc[s.key] =
 // 通用確認彈窗（取代瀏覽器預設的 confirm()）
 // =====================================================================
 function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, hideCancel, onConfirm, onCancel }) {
+  const { className, requestClose } = useConfirmModalAnimation();
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 " + className}>
         <h2 className="text-lg font-bold mb-2">{title}</h2>
         <p className="text-sm text-slate-600 mb-5 whitespace-pre-wrap">{message}</p>
         <div className="flex gap-2 justify-end">
-          {!hideCancel && <button onClick={onCancel} className="text-sm text-slate-500 px-4 py-2">{cancelLabel || "取消"}</button>}
-          <button onClick={onConfirm} className={"text-sm text-white rounded-lg px-4 py-2 " + (danger ? "bg-rose-600" : "bg-slate-900")}>
+          {!hideCancel && <button onClick={() => requestClose(onCancel)} className="text-sm text-slate-500 px-4 py-2">{cancelLabel || "取消"}</button>}
+          <button onClick={() => requestClose(onConfirm)} className={"text-sm text-white rounded-lg px-4 py-2 " + (danger ? "bg-rose-600" : "bg-slate-900")}>
             {confirmLabel || "確認"}
           </button>
         </div>
@@ -1579,6 +1655,7 @@ function newDraftItem(content, extra) {
 }
 
 function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, aiBanned, initialTitle, initialContent }) {
+  const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   const [title, setTitle] = useState(initialTitle || "");
   const [content, setContent] = useState(initialContent || "");
   const [contentOpen, setContentOpen] = useState(!!initialContent); // 有帶入初始內容（例如從靈感升級而來）時，預設直接展開讓使用者看得到
@@ -1607,9 +1684,9 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [workDimFromAi, setWorkDimFromAi] = useState(false);
   const [workAiBusy, setWorkAiBusy] = useState(false);
   const [workAiErr, setWorkAiErr] = useState(null);
+  const [aiInsufficientModal, setAiInsufficientModal] = useState(false); // 標題資訊量不足時擋下 AI 呼叫，兩個 AI 按鈕共用同一個提示彈窗
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [aiInsufficientModal, setAiInsufficientModal] = useState(false); // 標題資訊量不足時擋下 AI 呼叫，兩個 AI 按鈕共用同一個提示彈窗
 
   // 任務規模自動判定：只要左欄任一項目有結構化細節，且使用者沒有明確鎖住手動，就自動接管
   useEffect(() => {
@@ -1758,8 +1835,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         });
         if (wdError) throw wdError;
       }
-      onCreated(created.id);
-      onClose();
+      requestClose(() => { onCreated(created.id); onClose(); });
     } catch (e2) {
       setErr(e2.message);
     } finally { setBusy(false); }
@@ -1768,10 +1844,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6 " + popClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div>
@@ -2085,6 +2161,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
 }
 
 function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, workSubDimension, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
+  const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2614,7 +2691,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col " + popClassName} style={popStyle}>
         <div className="px-6 pt-6 pb-3 border-b border-slate-100">
           <div className="flex justify-between items-start mb-2">
             <div>
@@ -2626,7 +2703,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                 </button>
               )}
             </div>
-            <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+            <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
           </div>
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-xl font-bold">{mission.title}</h2>
@@ -3294,7 +3371,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             message={`確定要永久刪除「${mission.title}」這個任務嗎？此動作無法復原！`}
             confirmLabel="確定刪除"
             danger
-            onConfirm={() => { onDelete(missionId); setConfirmDeleteMission(false); onClose(); }}
+            onConfirm={() => { onDelete(missionId); setConfirmDeleteMission(false); requestClose(onClose); }}
             onCancel={() => setConfirmDeleteMission(false)}
           />
         )}
@@ -4886,6 +4963,7 @@ function SettingsView({ profile, onProfileChange }) {
 // 新增專案 Modal
 // =====================================================================
 function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }) {
+  const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -4914,7 +4992,7 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
         if (memberErr) throw memberErr;
       }
       onCreated();
-      onClose();
+      requestClose(onClose);
     } catch (e2) {
       setErr(e2.message);
     } finally { setBusy(false); }
@@ -4922,10 +5000,10 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 " + popClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">新增專案</h2>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
         <form onSubmit={submit} className="space-y-3">
           <div>
