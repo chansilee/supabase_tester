@@ -3658,7 +3658,8 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
     const isOwn = m.creator_id === currentUserId;
     const isOpenStatus = m.status === "added" || m.status === "in_progress" || m.status === "waiting";
     const isStarred = starredIds && starredIds.has(m.id);
-    const rowStarStyle = isStarred ? starCellStyle : null;
+    // 已完成/已棄置的任務不該再顯示「注目任務」的遮色提示——就算完成前有標記過，結案後就該回到正常樣式
+    const rowStarStyle = (isStarred && isOpenStatus) ? starCellStyle : null;
     switch (key) {
       case "closed_at": return td(key, fmt(m.updated_at), "px-4 py-3 whitespace-nowrap text-slate-500", null, rowStarStyle);
       case "final_comment": return td(key, m.final_comment || "—", "px-4 py-3 text-slate-600", null, rowStarStyle,
@@ -5415,12 +5416,14 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
 
   const relevant = missions.filter(m => m.category_scores && (showAll || isRelevantToUser(m, currentUserId))
     && (Number(m.category_scores[categoryKey]) || 0) >= threshold);
-  // 不管選哪一種排序模式，都要照「顯示區塊設定」分成未結案/已完成/已棄置三段——這點要跟個人任務/專案任務
-  // 頁面的行為一致：排序模式只決定「段落內」的順序，不是決定要不要分段。之前只有「類別分數優先」有分段，
-  // 其餘 8 種既有模式會把三種狀態混在一起顯示，是漏掉了這個一致性。
-  const sortWithinTier = list => sortMode === "category_first"
-    ? sortMissionsByCategory(list, categoryKey, weights)
-    : sortMissions(list, sortMode, weights);
+  // 排序設定只影響「未結案」這一段；已完成/已棄置不管選哪種排序模式，一律固定用「最後更新」排序——
+  // 已結案的任務不太需要照類別分數/優先級這些「還要不要處理」導向的排序邏輯去排，用最後更新反而更直覺
+  const sortForTier = (list, tierKey) => {
+    if (tierKey !== "open") return sortMissions(list, "updated_desc", weights);
+    return sortMode === "category_first"
+      ? sortMissionsByCategory(list, categoryKey, weights)
+      : sortMissions(list, sortMode, weights);
+  };
 
   // 「工作」分類專用：套用子類別選單時，每個狀態分層底下再依設定的維度細分小節
   const workSubDimKey = profile.work_sub_dimension || "functional_category";
@@ -5439,7 +5442,7 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
   const groups = [];
   tierDefs.forEach(t => {
     if (visibleSections?.[t.key] === false) return;
-    const tierItems = sortWithinTier(relevant.filter(m => statusTier(m.status) === t.tier));
+    const tierItems = sortForTier(relevant.filter(m => statusTier(m.status) === t.tier), t.key);
     if (tierItems.length === 0) return;
     if (!useSubGrouping) {
       groups.push({ key: t.key, label: t.label, columnMode: t.columnMode, items: tierItems });
