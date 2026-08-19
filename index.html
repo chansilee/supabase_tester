@@ -455,6 +455,34 @@ table { border-collapse: collapse; width: 100%; }
   .btn-solid-flash { transition: background-color 100ms ease; }
   .btn-solid-flash:active { background-color: #334155; }
 
+  /* 「閃光掃過」：搜尋按鈕 hover/focus 時，一道柔和的斜向光帶從左側掃到右側。
+     isolation:isolate 讓 ::after 的疊層只影響按鈕內部，不會跟外面的 z-index 打架；
+     圖示要蓋在光帶上面（z-index:2），不然光掃過去的時候會被蓋住 */
+  .shine-btn { position: relative; overflow: hidden; isolation: isolate; }
+  .shine-btn::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -75%;
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0) 30%,
+      rgba(255, 255, 255, 0.55) 50%,
+      rgba(255, 255, 255, 0) 70%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    transform: skewX(-20deg);
+    transition: left 650ms cubic-bezier(0.19, 1, 0.22, 1);
+    z-index: 1;
+    pointer-events: none;
+  }
+  .shine-btn:hover::after, .shine-btn:focus-visible::after { left: 125%; }
+  .shine-btn:active { transform: scale(0.98); }
+  .shine-btn-icon { position: relative; z-index: 2; }
+
   /* 分類 emoji：維持原本色彩，不做任何濾鏡調整 */
   .category-emoji-mono {}
 
@@ -4994,7 +5022,7 @@ function SettingsView({ profile, onProfileChange }) {
         <div className="flex gap-2">
           <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="輸入名稱或 email"
             className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" onKeyDown={e => e.key === "Enter" && doSearch()} />
-          <button onClick={doSearch} className="bg-slate-100 rounded-lg px-3"><Icon.Search className="w-4 h-4"/></button>
+          <button onClick={doSearch} className="bg-slate-100 rounded-lg px-3 shine-btn"><Icon.Search className="w-4 h-4 shine-btn-icon"/></button>
         </div>
         <div className="mt-2 space-y-2">
           {searchResults.map(r => (
@@ -5583,8 +5611,8 @@ function IdeaPoolPage({ ideaNotes, onOpenIdea, onNewIdea }) {
             onKeyDown={e => e.key === "Enter" && runSearch()}
             placeholder="搜尋靈感標題或內容…"
             className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-          <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
-            <Icon.Search className="w-4 h-4" />
+          <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center shine-btn">
+            <Icon.Search className="w-4 h-4 shine-btn-icon" />
           </button>
         </div>
         <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
@@ -6482,8 +6510,8 @@ function Dashboard({ session, profile, setProfile }) {
                 onKeyDown={e => e.key === "Enter" && runSearch()}
                 placeholder="搜尋任務標題或內文…"
                 className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-              <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
-                <Icon.Search className="w-4 h-4" />
+              <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center shine-btn">
+                <Icon.Search className="w-4 h-4 shine-btn-icon" />
               </button>
             </div>
             <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
@@ -6676,8 +6704,8 @@ function Dashboard({ session, profile, setProfile }) {
                     onKeyDown={e => e.key === "Enter" && runSearch()}
                     placeholder="搜尋任務標題或內文…"
                     className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-                  <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
-                    <Icon.Search className="w-4 h-4" />
+                  <button onClick={runSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center shine-btn">
+                    <Icon.Search className="w-4 h-4 shine-btn-icon" />
                   </button>
                 </div>
                 <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
@@ -6794,8 +6822,8 @@ function Dashboard({ session, profile, setProfile }) {
                   onKeyDown={e => e.key === "Enter" && runGlobalSearch()}
                   placeholder="全域搜尋任務標題或內文（包括：個人任務/專案任務）…"
                   className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-                <button onClick={runGlobalSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center">
-                  <Icon.Search className="w-4 h-4" />
+                <button onClick={runGlobalSearch} className="bg-slate-900 text-white rounded-lg px-4 flex items-center justify-center shine-btn">
+                  <Icon.Search className="w-4 h-4 shine-btn-icon" />
                 </button>
               </div>
               <div className="flex justify-between items-center flex-wrap gap-2 mt-3">
