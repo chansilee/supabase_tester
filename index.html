@@ -5760,6 +5760,8 @@ function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote 
 
   const debounceRef = useRef(null);
   const maxWaitRef = useRef(null);
+  const savingRef = useRef(false); // 是否已經有一個存檔請求在飛行中（用 ref 不用 state，才能在同一個事件循環裡立即擋住，不用等重新渲染）
+  const pendingAfterSaveRef = useRef(false); // 存檔進行中又被要求再存一次，先記下來，這次做完後補做一次
   const titleRef = useRef(title);
   const contentRef = useRef(content);
   titleRef.current = title;
@@ -5778,6 +5780,14 @@ function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote 
   async function actuallySave() {
     // 標題內容都空、而且從沒存過，沒東西好存，不用打資料庫
     if (!titleRef.current.trim() && !contentRef.current.trim() && !ideaId) return;
+    // 真正的 bug 根源在這裡：如果已經有一個存檔請求還在飛行中（例如打字打很久，最長等待 8 秒的
+    // 保險機制先觸發了一次存檔，但這時使用者又繼續打字、2 秒防抖又到期），舊的存檔可能還沒等到
+    // 伺服器回應、還不知道剛剛存出來的新靈感 id 是多少，這次新的存檔就會誤判成「還沒存過」，
+    // 結果兩個請求都各自 insert 一筆，變成分裂成兩條靈感。這裡擋住「同時只能有一個存檔在飛行中」，
+    // 被擋下來的這次先記著，等前一個真的做完、拿到正確的 id 之後再補做一次，就不會分裂了。
+    // 單純拉長防抖/最長等待的秒數只是降低發生機率，沒有真正解決這個競態問題。
+    if (savingRef.current) { pendingAfterSaveRef.current = true; return; }
+    savingRef.current = true;
     setSavingState("saving"); setErr(null);
     try {
       if (ideaId) {
@@ -5800,6 +5810,11 @@ function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote 
       setErr(e.message);
     } finally {
       setSavingState("idle");
+      savingRef.current = false;
+      if (pendingAfterSaveRef.current) {
+        pendingAfterSaveRef.current = false;
+        actuallySave(); // 補做剛剛被擋下來的那次；這時 ideaId 已經是最新的了，會正確走 update 而不是又 insert 一筆
+      }
     }
   }
   async function doSave() {
