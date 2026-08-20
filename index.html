@@ -2406,6 +2406,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const statusFooterAnimRef = useAnimatedHeight(pendingStatus === null ? "buttons" : "form");
   const [statusChangeErr, setStatusChangeErr] = useState(null); // 狀態切換專用的錯誤訊息，跟通用的 err 分開，就近顯示在「確認切換」旁邊
   const [editingBody, setEditingBody] = useState(false);
+  const editBodyAnimRef = useAnimatedHeight(editingBody);
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editContentOpen, setEditContentOpen] = useState(false);
@@ -2998,6 +2999,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         </div>
 
         <div className="overflow-y-auto flex-1 px-6 pb-6 pt-4">
+        <div ref={editBodyAnimRef}>
         {!editingBody ? (
           <div>
             {mission.content && (
@@ -3352,6 +3354,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             </div>
           </div>
         )}
+        </div>
         {confirmDeadlineOverwrite && (
           <ConfirmModal
             title="覆蓋截止時間？"
