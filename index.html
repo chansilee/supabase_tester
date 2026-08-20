@@ -2359,12 +2359,13 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
 // 任務詳情 Modal
 // =====================================================================
 function ProjectPickerModal({ projects, onPick, onClose }) {
+  const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[70vh] overflow-y-auto p-6">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-sm max-h-[70vh] overflow-y-auto p-6 " + popClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">選擇要移入的專案</h2>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
         <div className="space-y-2">
           {projects.length === 0 && <p className="text-sm text-slate-400">目前沒有可選擇的專案</p>}
@@ -5324,6 +5325,7 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
 // 編輯專案 Modal（新增/移除成員）
 // =====================================================================
 function EditProjectModal({ project, members, friendProfiles, openMissions, onClose, onChanged }) {
+  const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   const [nameDraft, setNameDraft] = useState(project.name);
   const [descDraft, setDescDraft] = useState(project.description || "");
   const [savingInfo, setSavingInfo] = useState(false);
@@ -5374,10 +5376,10 @@ function EditProjectModal({ project, members, friendProfiles, openMissions, onCl
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 " + popClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">編輯專案</h2>
-          <button onClick={onClose}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
+          <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
         </div>
 
         <div className="space-y-2 mb-4">
