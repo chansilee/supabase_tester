@@ -551,6 +551,42 @@ function useConfirmModalAnimation() {
 // 不只處理單純的「顯示/隱藏」，也處理「兩種不同內容互換」（例如按鈕列 <-> 表單）：
 // switchKey 改變時才會跑動畫，同一個 key 底下內容自己變化（例如打字）不會誤觸發。
 // 回傳一個 ref，掛在包住內容的那個 wrapper div 上即可，不用額外處理 style。
+// cubic-bezier 數值求解器（標準 Newton-Raphson 逼近法）：給時間進度 x（0~1），算出這條貝茲曲線
+// 對應的輸出進度。用來讓「捲動」這種沒有 CSS transition 可以直接套用的動作，也能套用
+// 跟其他展開/收合動畫一致的 cubic-bezier(0.4, 0, 0.2, 1) 曲線，不是瀏覽器原生 smooth 捲動的固定節奏
+function makeBezierEasing(mX1, mY1, mX2, mY2) {
+  const A = (a1, a2) => 1 - 3 * a2 + 3 * a1;
+  const B = (a1, a2) => 3 * a2 - 6 * a1;
+  const C = a1 => 3 * a1;
+  const calcBezier = (t, a1, a2) => ((A(a1, a2) * t + B(a1, a2)) * t + C(a1)) * t;
+  const getSlope = (t, a1, a2) => 3 * A(a1, a2) * t * t + 2 * B(a1, a2) * t + C(a1);
+  function getTForX(x) {
+    let t = x;
+    for (let i = 0; i < 8; i++) {
+      const slope = getSlope(t, mX1, mX2);
+      if (slope === 0) return t;
+      t -= (calcBezier(t, mX1, mX2) - x) / slope;
+    }
+    return t;
+  }
+  return x => (mX1 === mY1 && mX2 === mY2) ? x : calcBezier(getTForX(x), mY1, mY2);
+}
+const materialEasing = makeBezierEasing(0.4, 0, 0.2, 1);
+// 把捲動容器平滑捲到指定位置，用上面那條曲線控制速度（先加速後減速），不是瀏覽器原生 smooth 捲動
+function smoothScrollTo(el, targetTop, duration = 500) {
+  if (!el) return;
+  const startTop = el.scrollTop;
+  const distance = targetTop - startTop;
+  if (Math.abs(distance) < 1) return;
+  const startTime = performance.now();
+  function step(now) {
+    const progress = Math.min((now - startTime) / duration, 1);
+    el.scrollTop = startTop + distance * materialEasing(progress);
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 function useAnimatedHeight(switchKey) {
   const wrapRef = useRef(null);
   const prevKeyRef = useRef(switchKey);
@@ -2505,6 +2541,32 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     }
   }, [checklist, mission?.scale_source, mission?.scale, missionId]);
 
+  // 更新紀錄：依排序方向算出目前要顯示的清單，跟真正「時間上最新」的那一筆是誰（給發光框跟自動捲動共用）。
+  // 這幾行、還有下面的 useEffect，故意放在「if (!mission) return null」這行之前——
+  // 這是我上一版的 bug：Hook 一定要在元件每一次 render 都用同樣的順序、同樣的數量呼叫，
+  // 放在 early return 之後會導致「任務還沒載入完成時」跟「載入完成後」呼叫到的 Hook 數量不一樣，
+  // React 會直接丟出 #310 這個錯誤（Rendered more hooks than during the previous render）。
+  // updates 這個 state 一開始就是空陣列，跟 mission 有沒有載入完成無關，搬到這裡完全不影響邏輯。
+  const visibleUpdateLogs = showSystemLogs === false ? updates.filter(u => !u.is_system) : updates;
+  const updateLogSortDir = (updateLogSortOrder || "desc") === "desc" ? -1 : 1;
+  const sortedUpdateLogs = [...visibleUpdateLogs].sort((a, b) => updateLogSortDir * (new Date(a.created_at) - new Date(b.created_at)));
+  const latestUpdateLogId = sortedUpdateLogs.reduce((latest, u) =>
+    (!latest || new Date(u.created_at) > new Date(latest.created_at)) ? u : latest, null)?.id;
+
+  const updateLogScrollRef = useRef(null);
+  const updateLogScrollTriggerRef = useRef(null);
+  useEffect(() => {
+    const el = updateLogScrollRef.current;
+    if (!el) return;
+    const triggerKey = `${updateLogSortOrder}|${latestUpdateLogId}`;
+    const isFirstRun = updateLogScrollTriggerRef.current === null;
+    if (updateLogScrollTriggerRef.current === triggerKey) return;
+    updateLogScrollTriggerRef.current = triggerKey;
+    const target = (updateLogSortOrder || "desc") === "desc" ? 0 : el.scrollHeight;
+    if (isFirstRun) { el.scrollTop = target; return; } // 第一次掛載直接定位，不用播過場動畫
+    smoothScrollTo(el, target, 500);
+  }, [updateLogSortOrder, latestUpdateLogId]);
+
   if (!mission) return null;
   const normalizedWorkDim = Array.isArray(mission.work_dimensions) ? mission.work_dimensions[0] : mission.work_dimensions;
 
@@ -3512,40 +3574,31 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
               </label>
             </div>
           </div>
-          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-            {(() => {
-              const filteredUpdates = showSystemLogs === false ? updates.filter(u => !u.is_system) : updates;
-              const sortDir = (updateLogSortOrder || "desc") === "desc" ? -1 : 1;
-              const visibleUpdates = [...filteredUpdates].sort((a, b) => sortDir * (new Date(a.created_at) - new Date(b.created_at)));
-              return (
-                <>
-                  {visibleUpdates.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
-                  {visibleUpdates.map(u => (
-                    <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                      <div className="text-xs text-slate-400 mb-1">
-                        {u.is_system ? "System" : u.author?.display_name} ({fmt(u.created_at)})
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap">
-                        {u.is_system
-                          ? u.content.split("\n").map((line, i) => <React.Fragment key={i}>{i > 0 && <br/>}{u.author?.display_name}{line}</React.Fragment>)
-                          : u.content}
-                      </p>
-                      {u.is_system ? (
-                        <div className="flex justify-end mt-1">
-                          <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
-                        </div>
-                      ) : u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
-                        <div className="flex justify-end mt-1">
-                          <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
-                            <Icon.Trash className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </>
-              );
-            })()}
+          <div ref={updateLogScrollRef} className="space-y-2 max-h-56 overflow-y-auto pr-1">
+            {sortedUpdateLogs.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
+            {sortedUpdateLogs.map(u => (
+              <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2" style={u.id === latestUpdateLogId ? { boxShadow: "inset 0 0 25px 0px rgba(255, 255, 0, 0.5)" } : undefined}>
+                <div className="text-xs text-slate-400 mb-1">
+                  {u.is_system ? "System" : u.author?.display_name} ({fmt(u.created_at)})
+                </div>
+                <p className="text-sm whitespace-pre-wrap">
+                  {u.is_system
+                    ? u.content.split("\n").map((line, i) => <React.Fragment key={i}>{i > 0 && <br/>}{u.author?.display_name}{line}</React.Fragment>)
+                    : u.content}
+                </p>
+                {u.is_system ? (
+                  <div className="flex justify-end mt-1">
+                    <span className="text-xs text-slate-400">〈系統自動記錄〉</span>
+                  </div>
+                ) : u.author_id === currentUser.id && mission.status !== "completed" && mission.status !== "abandoned" && (
+                  <div className="flex justify-end mt-1">
+                    <button onClick={() => setConfirmDeleteUpdateId(u.id)} title="刪除留言" className="flex items-center justify-center text-rose-500 hover:text-rose-600">
+                      <Icon.Trash className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
 
