@@ -1821,6 +1821,9 @@ function newDraftItem(content, extra) {
 
 function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, currentUserId, currentUserName, assigneeOptions, projectId, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, aiBanned, initialTitle, initialContent }) {
   const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
+  // 建立任務成功走模式二（不用縮回按鈕原位置）；按 X 放棄離開維持模式一，兩者分開追蹤、動畫互斥
+  const { closing: createClosing, className: createCloseClassName, requestClose: requestCreateClose } = useConfirmModalAnimation();
+  const effectivePopClassName = createClosing ? createCloseClassName : popClassName;
   const [title, setTitle] = useState(initialTitle || "");
   const [content, setContent] = useState(initialContent || "");
   const [contentOpen, setContentOpen] = useState(!!initialContent); // 有帶入初始內容（例如從靈感升級而來）時，預設直接展開讓使用者看得到
@@ -2003,7 +2006,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
         });
         if (wdError) throw wdError;
       }
-      requestClose(() => { onCreated(created.id); onClose(); });
+      requestCreateClose(() => { onCreated(created.id); onClose(); });
     } catch (e2) {
       setErr(e2.message);
     } finally { setBusy(false); }
@@ -2012,7 +2015,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6 " + popClassName} style={popStyle}>
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6 " + effectivePopClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">{projectId ? "新增子任務" : "新增任務"}</h2>
           <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -2342,6 +2345,10 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
 
 function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, workSubDimension, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
   const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
+  // 刪除任務走模式二（不用縮回按鈕原位置）：跟一般關閉（X／編輯完成）分開追蹤，
+  // 兩種關閉方式的動畫 class 互斥，用 deleteClosing 這個旗標決定當下該套用哪一種
+  const { closing: deleteClosing, className: deleteCloseClassName, requestClose: requestDeleteClose } = useConfirmModalAnimation();
+  const effectivePopClassName = deleteClosing ? deleteCloseClassName : popClassName;
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
@@ -2879,7 +2886,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col " + popClassName} style={popStyle}>
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col " + effectivePopClassName} style={popStyle}>
         <div className="px-6 pt-6 pb-3 border-b border-slate-100">
           <div className="flex justify-between items-start mb-2">
             <div>
@@ -3569,7 +3576,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             message={`確定要永久刪除「${mission.title}」這個任務嗎？此動作無法復原！`}
             confirmLabel="確定刪除"
             danger
-            onConfirm={() => { onDelete(missionId); setConfirmDeleteMission(false); requestClose(onClose); }}
+            onConfirm={() => { onDelete(missionId); setConfirmDeleteMission(false); requestDeleteClose(onClose); }}
             onCancel={() => setConfirmDeleteMission(false)}
           />
         )}
@@ -5176,6 +5183,9 @@ function SettingsView({ profile, onProfileChange }) {
 // =====================================================================
 function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }) {
   const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
+  // 建立專案成功走模式二（不用縮回按鈕原位置）；按 X 放棄離開維持模式一
+  const { closing: createClosing, className: createCloseClassName, requestClose: requestCreateClose } = useConfirmModalAnimation();
+  const effectivePopClassName = createClosing ? createCloseClassName : popClassName;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
@@ -5204,7 +5214,7 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
         if (memberErr) throw memberErr;
       }
       onCreated();
-      requestClose(onClose);
+      requestCreateClose(onClose);
     } catch (e2) {
       setErr(e2.message);
     } finally { setBusy(false); }
@@ -5212,7 +5222,7 @@ function NewProjectModal({ onClose, onCreated, friendProfiles, currentUserName }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 " + popClassName} style={popStyle}>
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 " + effectivePopClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">新增專案</h2>
           <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
@@ -5732,6 +5742,9 @@ function IdeaPoolPage({ ideaNotes, onOpenIdea, onNewIdea }) {
 // 2 秒防抖永遠不會觸發，所以另外疊一個 8 秒的保險，不管有沒有停頓，超過就強制存一次
 function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote }) {
   const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
+  // 刪除靈感走模式二（不用縮回按鈕原位置），道理跟任務內頁的永久刪除一樣
+  const { closing: deleteClosing, className: deleteCloseClassName, requestClose: requestDeleteClose } = useConfirmModalAnimation();
+  const effectivePopClassName = deleteClosing ? deleteCloseClassName : popClassName;
   const [ideaId, setIdeaId] = useState(idea?.id || null);
   const [title, setTitle] = useState(idea?.title || "");
   const [content, setContent] = useState(idea?.content || "");
@@ -5827,12 +5840,12 @@ function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote 
   }
 
   async function handleDelete() {
-    if (!ideaId) { requestClose(onClose); return; }
+    if (!ideaId) { requestDeleteClose(onClose); return; }
     const { error } = await sb.from("idea_notes").delete().eq("id", ideaId);
     if (error) { setErr(error.message); return; }
     setConfirmDelete(false);
     onChanged();
-    requestClose(onClose);
+    requestDeleteClose(onClose);
   }
 
   async function handlePromote() {
@@ -5849,7 +5862,7 @@ function IdeaEditorModal({ idea, currentUserName, onClose, onChanged, onPromote 
   return (
     <>
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6 " + popClassName} style={popStyle}>
+      <div className={"bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6 " + effectivePopClassName} style={popStyle}>
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold">
             {!ideaId ? `您好！${currentUserName}，今天有什麼靈感？` : "編輯靈感"}
