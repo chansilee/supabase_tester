@@ -282,6 +282,7 @@ table { border-collapse: collapse; width: 100%; }
 .underline { text-decoration: underline; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .whitespace-nowrap { white-space: nowrap; }
+.leading-tight { line-height: 1.25; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 .border { border-width: 1px; border-style: solid; border-color: #e2e8f0; }
 .border-2 { border-width: 2px; border-style: solid; }
@@ -916,9 +917,69 @@ const CATEGORY_DISPLAY_MODE_OPTIONS = [
   { key: "text_icon", label: "文字+圖案" },
 ];
 const DEFAULT_CATEGORY_DISPLAY_MODES = { detail_view: "text", detail_edit: "text", list: "text" };
-// 依顯示模式組出「類別」欄位要印的文字：文字/圖案(emoji)/文字+圖案。
-// emojiOverride 是使用者自訂的分類圖示覆蓋值（沒改過的分類會自動退回內建預設 CATEGORY_EMOJI）。
-// emoji 一律用灰階濾鏡呈現（方案 A：保留使用者可自訂 emoji 的彈性，同時視覺上簡約一點，不是彩色）
+// 分類圖示：優先讀取跟 task-cloud.html 同資料夾下的「分類 key.svg」（例如 work.svg），
+// 讀不到（檔案不存在、格式錯誤）就自動退回 emoji（使用者自訂過的優先、沒改過的用內建預設）。
+// 用 <img src="xxx.svg"> 而不是把 SVG 內容嵌進頁面，這樣以後要換圖只要覆蓋掉那個 svg 檔案，
+// 完全不用改 task-cloud.html，維護起來輕鬆很多；讀取失敗靠 <img> 原生的 onError 事件偵測，
+// 不用自己額外寫 fetch/try-catch 判斷檔案存不存在。
+function CategoryIcon({ categoryKey, size, emojiOverride, className, tintColor }) {
+  const [svgFailed, setSvgFailed] = useState(false);
+  const dim = size || "1em";
+  const fileName = `svg_src/${categoryKey}.svg`;
+  if (svgFailed) {
+    const emoji = (emojiOverride && emojiOverride[categoryKey]) || CATEGORY_EMOJI[categoryKey];
+    return <span className={className} style={{ fontSize: dim, lineHeight: 1 }}>{emoji}</span>;
+  }
+  if (tintColor) {
+    // 用 mask-image 把單色 SVG 當形狀遮罩，實際顏色交給 background-color 決定，完全不動原始檔案。
+    // 這裡有個容易踩到的坑：外部 SVG 當 mask 來源時，瀏覽器預設用「亮度」判斷透明度（mask-mode: luminance），
+    // 亮度=0（也就是黑色）在這個模式下會被當成「完全透明、看不到」——這正好跟黑色物件的 SVG 完全相反，
+    // 結果就是整張圖都被遮成看不到。要明確指定 mask-mode: alpha，改用「透明度」而不是「亮度」判斷，
+    // 黑色物件本身 alpha=1（不透明），才會正確顯示出形狀。
+    // 另外注意：這個做法要用 http://（例如 Live Server）開啟頁面才會生效，直接雙擊用 file:// 開啟
+    // 部分瀏覽器對本機檔案當 mask 資源會有限制，畫面會整個空白；用本機伺服器開就正常。
+    // mask-image 本身沒有 onError，所以另外藏一個看不見的 <img> 專門負責偵測讀取成功/失敗
+    const maskStyle = {
+      display: "block", width: dim, height: dim, backgroundColor: tintColor,
+      WebkitMaskImage: `url(${fileName})`, maskImage: `url(${fileName})`,
+      WebkitMaskSize: "contain", maskSize: "contain",
+      WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
+      WebkitMaskPosition: "center", maskPosition: "center",
+      WebkitMaskMode: "alpha", maskMode: "alpha",
+    };
+    return (
+      <span style={{ position: "relative", display: "inline-block", width: dim, height: dim }}>
+        <img src={fileName} onError={() => setSvgFailed(true)} alt="" style={{ display: "none" }} />
+        <span className={className} style={maskStyle} />
+      </span>
+    );
+  }
+  return (
+    <img src={fileName} onError={() => setSvgFailed(true)}
+      alt={AI_CATEGORY_LABELS[categoryKey] || categoryKey} className={className}
+      style={{ width: dim, height: dim, display: "inline-block", verticalAlign: "-0.15em", objectFit: "contain" }} />
+  );
+}
+// 純 debug 用的分類圖示格子：跟 CategoryIcon 不一樣的地方是「讀不到不退回 emoji」，
+// 直接把失敗原因（缺哪個檔名）印在格子裡，方便你確認到底是哪個檔案沒放對
+function CategoryIconDebugCell({ categoryKey }) {
+  const [failed, setFailed] = useState(false);
+  const fileName = `svg_src/${categoryKey}.svg`;
+  return (
+    <label className="flex flex-col items-center gap-1">
+      <div className="w-full flex items-center justify-center bg-white rounded-lg py-1.5" style={{ minHeight: "2.75rem" }}>
+        {!failed ? (
+          <img src={fileName} onError={() => setFailed(true)} alt={AI_CATEGORY_LABELS[categoryKey]}
+            style={{ width: "1.75rem", height: "1.75rem", objectFit: "contain" }} />
+        ) : (
+          <span className="text-[10px] text-rose-500 text-center px-1 leading-tight">缺失 {fileName}</span>
+        )}
+      </div>
+      <span className="text-[10px] text-slate-400">{AI_CATEGORY_LABELS[categoryKey]}</span>
+    </label>
+  );
+}
+// emojiOverride 是使用者自訂的 emoji 備援值（沒改過的分類會自動退回內建預設 CATEGORY_EMOJI）。
 function renderCategoryText(displayModes, context, primaryCategory, emojiOverride, workDim, workSubDimensionKey) {
   if (!primaryCategory) return "—";
   const mode = (displayModes && displayModes[context]) || "text";
@@ -927,9 +988,8 @@ function renderCategoryText(displayModes, context, primaryCategory, emojiOverrid
     const sub = workSubLabel(workSubDimensionKey, workDim);
     if (sub) label = `${label}-${sub}`;
   }
-  const emoji = (emojiOverride && emojiOverride[primaryCategory]) || CATEGORY_EMOJI[primaryCategory];
-  if (mode === "icon") return <span className="category-emoji-mono">{emoji}</span>;
-  if (mode === "text_icon") return <><span className="category-emoji-mono">{emoji}</span> {label}</>;
+  if (mode === "icon") return <CategoryIcon categoryKey={primaryCategory} emojiOverride={emojiOverride} className="category-emoji-mono" />;
+  if (mode === "text_icon") return <><CategoryIcon categoryKey={primaryCategory} emojiOverride={emojiOverride} className="category-emoji-mono" /> {label}</>;
   return label;
 }
 
@@ -1305,6 +1365,15 @@ const CATEGORY_CARD_COLOR = {
   work: "#3b82f6", finance: "#10b981", chores: "#f59e0b", health: "#ef4444", family: "#f97316",
   social: "#ec4899", learning: "#8b5cf6", travel: "#06b6d4", admin: "#64748b", other: "#94a3b8",
 };
+// 把 CATEGORY_CARD_COLOR 的色調變深（每個色版都往下壓百分比），給類別瀏覽首頁的圖示遮罩上色用。
+// 直接算而不是額外維護一份寫死的深色表，這樣以後 CATEGORY_CARD_COLOR 改了，深色版也會自動跟著變
+function darkenHex(hex, amount = 0.35) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * (1 - amount));
+  const g = Math.round(((n >> 8) & 255) * (1 - amount));
+  const b = Math.round((n & 255) * (1 - amount));
+  return `rgb(${r},${g},${b})`;
+}
 
 // =====================================================================
 // 「工作」分類專用的六個管理學維度：功能子類別/任務層級/優先矩陣/任務型態/成長策略/資源瓶頸
@@ -4767,6 +4836,14 @@ function SettingsView({ profile, onProfileChange }) {
             </div>
 
             <div className="mb-3 pt-3 border-t border-slate-200">
+              <p className="text-xs text-slate-500 mb-2">外部分類圖案（以 svg 載入方式，需放在 task-cloud.html 同層的 svg_src 子目錄下）</p>
+              <div className="grid grid-cols-5 gap-2">
+                {AI_CATEGORIES.map(k => <CategoryIconDebugCell key={k} categoryKey={k} />)}
+              </div>
+              <p className="text-xs text-slate-400 mt-2">讀不到對應的 svg 檔案時，這裡會直接顯示缺少哪個檔名方便除錯；但實際任務畫面上還是會自動退回上面設定的 emoji，不會整個空白。</p>
+            </div>
+
+            <div className="mb-3 pt-3 border-t border-slate-200">
               <div className="flex justify-between items-center text-xs">
                 <label className="text-slate-500">「工作」分類子維度顯示（例：工作-內部:研發工藝）：</label>
                 {editingCategoryDisplay ? (
@@ -5386,7 +5463,7 @@ function CategoryGridPage({ missions, currentUserId, onOpenCategory, showAll, on
           <button key={key} onClick={() => onOpenCategory(key)}
             className="flex flex-col items-center justify-center gap-2 rounded-2xl py-8 hover:opacity-90 transition"
             style={{ background: `${CATEGORY_CARD_COLOR[key]}1a`, border: `1px solid ${CATEGORY_CARD_COLOR[key]}40` }}>
-            <span className="category-emoji-mono" style={{ fontSize: "5rem", lineHeight: 1 }}>{(emojiOverride && emojiOverride[key]) || CATEGORY_EMOJI[key]}</span>
+            <CategoryIcon categoryKey={key} size="5rem" emojiOverride={emojiOverride} className="category-emoji-mono" tintColor={darkenHex(CATEGORY_CARD_COLOR[key])} />
             <span className="text-sm font-semibold" style={{ color: CATEGORY_CARD_COLOR[key] }}>{AI_CATEGORY_LABELS[key]}</span>
             <span className="text-xs text-slate-400">{counts[key]} 項</span>
           </button>
@@ -5483,7 +5560,7 @@ function CategoryDetailPage({ categoryKey, missions, currentUserId, profile, vis
         </button>
       </div>
       <div className="flex items-center gap-3 mb-4">
-        <span className="category-emoji-mono" style={{ fontSize: "2rem" }}>{(profile.category_emoji_override && profile.category_emoji_override[categoryKey]) || CATEGORY_EMOJI[categoryKey]}</span>
+        <CategoryIcon categoryKey={categoryKey} size="2rem" emojiOverride={profile.category_emoji_override} className="category-emoji-mono" tintColor={darkenHex(CATEGORY_CARD_COLOR[categoryKey])} />
         <h2 className="text-xl font-bold" style={{ color: CATEGORY_CARD_COLOR[categoryKey] }}>{AI_CATEGORY_LABELS[categoryKey]}</h2>
         <span className="text-xs text-slate-400">共 {relevant.length} 項</span>
       </div>
