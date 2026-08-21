@@ -3673,7 +3673,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   {checklist.filter(i => i.is_checked).length} / {checklist.length}（{checklistProgress(checklist, mission.status)}%）
                 </span>
                 <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden" style={{ border: "1px solid #666666" }}>
-                  <div className="h-2 bg-blue-600" style={{ width: `${checklistProgress(checklist, mission.status)}%` }} />
+                  <div className="h-2 bg-blue-600" style={{ width: `${checklistProgress(checklist, mission.status)}%`, transition: "width 300ms cubic-bezier(0.4, 0, 0.2, 1)" }} />
                 </div>
               </div>
             )}
