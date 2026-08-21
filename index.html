@@ -2817,6 +2817,16 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const isCreator = mission.creator_id === currentUser.id;
   const isAssignee = mission.assigned_id === currentUser.id;
   const isClosed = mission.status === "completed" || mission.status === "abandoned";
+  // 標題外發光：只有「未結案+注目」才要亮，關掉（取消注目、或任務已結案）就是 0% 沒有發光。
+  // 這是單純的兩個狀態互相切換（亮/不亮），不是像更新紀錄那種要反覆閃爍的動畫，純 CSS transition
+  // 就能處理，不需要像 box-shadow 那個閃爍效果一樣寫 JS 逐幀計算。
+  const titleGlowActive = isStarred && !isClosed;
+  const titleGlowRgb = hexToRgb(effectiveGlow.color);
+  const titleGlowAlpha = titleGlowActive ? effectiveGlow.maxOpacity : 0;
+  const titleGlowStyle = {
+    transition: "text-shadow 600ms ease",
+    textShadow: `0 0 4px rgba(${titleGlowRgb.r}, ${titleGlowRgb.g}, ${titleGlowRgb.b}, ${titleGlowAlpha}), 0 0 48px rgba(${titleGlowRgb.r}, ${titleGlowRgb.g}, ${titleGlowRgb.b}, ${titleGlowAlpha * 0.6})`,
+  };
   const canToggleChecklist = (isCreator || isAssignee) && !isClosed;
   const typeLabel = mission.project_id ? "專案任務" : (mission.assigned_id === mission.creator_id ? "私人任務" : "私人指派任務");
   // 編輯時可選的指派對象：專案任務只能選專案成員；個人任務只能選自己或好友
@@ -3213,7 +3223,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             <button onClick={() => requestClose(onClose)}><Icon.Close className="w-5 h-5 text-slate-400"/></button>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-xl font-bold">{mission.title}</h2>
+            <h2 className="text-xl font-bold" style={titleGlowStyle}>{mission.title}</h2>
             {(!isClosed || isCreator) && (
               <div className="flex items-center gap-2 shrink-0">
                 {!isClosed && (
@@ -5243,14 +5253,14 @@ function SettingsView({ profile, onProfileChange }) {
 
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="flex justify-between items-center mb-2">
-              <h4 className="text-sm font-semibold text-slate-700">畫面閃爍設定</h4>
+              <h4 className="text-sm font-semibold text-slate-700">畫面光線閃爍設定</h4>
               {!editingGlow && <button onClick={startEditGlow} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
             </div>
-            <p className="text-xs text-slate-500 mb-3">任務內頁「更新紀錄」最新一筆的內發光閃爍效果，用來提醒你有新的更新進來。</p>
+            <p className="text-xs text-slate-500 mb-3">此特效應用於：1. 任務內頁「更新紀錄」最新一筆的內發光閃爍效果，用來提醒你有新的更新進來。2. 任務內頁「任務標題」在被注目的情況下，文字套用外發光。</p>
 
             <div className="space-y-3 text-xs">
               <div className="flex justify-between items-center">
-                <label className="text-slate-500">閃爍顏色</label>
+                <label className="text-slate-500">光線顏色</label>
                 {editingGlow ? (
                   <div className="flex items-center gap-2">
                     <input type="color" value={glowDraft.color} onChange={e => updateGlowDraft({ color: e.target.value })}
@@ -5266,7 +5276,7 @@ function SettingsView({ profile, onProfileChange }) {
               </div>
 
               <div className="flex justify-between items-center">
-                <label className="text-slate-500">閃爍次數</label>
+                <label className="text-slate-500">光線閃爍次數</label>
                 {editingGlow ? (
                   <select value={glowDraft.count} onChange={e => updateGlowDraft({ count: Number(e.target.value) })}
                     className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
@@ -5278,7 +5288,7 @@ function SettingsView({ profile, onProfileChange }) {
               </div>
 
               <div className="flex justify-between items-center">
-                <label className="text-slate-500">閃爍週期</label>
+                <label className="text-slate-500">光線閃爍週期</label>
                 {editingGlow ? (
                   <select value={glowDraft.period} onChange={e => updateGlowDraft({ period: Number(e.target.value) })}
                     className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
