@@ -622,6 +622,60 @@ function runGlowPulse(el, { color, period, count, minOpacity, maxOpacity }) {
   requestAnimationFrame(step);
 }
 
+// 給「更新紀錄」新插入一筆時用：讓那一列從 0 長高到自然高度，旁邊的其他列會被正常的文件排版
+// 自然往下（或往上，看新那筆插在哪個位置）推開，製造出「被推進來」的動態感——不管排序是新到舊
+// （新的一筆插在最上面）還是舊到新（插在最下面）都適用，都是同一個技巧。
+// 量高度的時機要在「還沒動過 explicit height」之前，避免踩到我們already學到的
+// scrollHeight = max(explicit, 自然高度) 那個坑。
+function growRowIn(el) {
+  if (!el) return;
+  const naturalH = el.scrollHeight;
+  // space-y-2 的 margin-top 在元素一掛載就已經套用（CSS 規則不受這裡的 JS 影響），跟 shrinkRowOut
+  // 同樣的道理：不一起動畫的話，那段間距會在高度都還是 0 的時候就先憑空出現，內容才慢慢長出來填滿，
+  // 順序感是反的。這裡一併把 margin-top 從 0 動畫到它原本該有的值，跟 height 同步。
+  const naturalMarginTop = parseFloat(getComputedStyle(el).marginTop) || 0;
+  el.style.overflow = "hidden";
+  el.style.transition = "none";
+  el.style.height = "0px";
+  el.style.marginTop = "0px";
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      el.style.transition = "height 300ms cubic-bezier(0.4, 0, 0.2, 1), margin-top 300ms cubic-bezier(0.4, 0, 0.2, 1)";
+      el.style.height = naturalH + "px";
+      el.style.marginTop = naturalMarginTop + "px";
+      setTimeout(() => { el.style.height = "auto"; el.style.marginTop = ""; el.style.overflow = ""; }, 300);
+    });
+  });
+}
+// growRowIn 的反向：刪除一列前，先把它的高度縮小到 0，讓下面的列自然被文件排版擠上來填補空隙，
+// 播完才真的送出刪除請求——回傳 Promise，呼叫端可以用 await 確保動畫播完才繼續，
+// 不會動畫還沒跑完，資料就先從畫面上憑空消失。
+function shrinkRowOut(el, duration = 300) {
+  return new Promise(resolve => {
+    if (!el) { resolve(); return; }
+    const naturalH = el.scrollHeight;
+    // 這個列表用 space-y-2 排間距（.space-y-2 > * + * { margin-top: 0.5rem }），這個 margin
+    // 是加在 border-box 外面的，就算用 border-box 讓 height 包含 padding，也不會包含到外面這段
+    // margin——只動 height 的話，縮到 0 之後這段 margin 缺口還是會留在畫面上，變成「縮到剩一點點
+    // 卡住」的殘影，一直到 React 真的把這個節點從 DOM 移除、margin 規則不再套用才會消失，
+    // 造成「卡一下才突然不見」的不順感。這裡把 margin-top 也一起量出來、跟 height 同步動畫收到 0，
+    // 這樣動畫播完的當下，整條列的實際垂直佔用空間就已經真的是 0，不會有殘留缺口。
+    const computedMarginTop = parseFloat(getComputedStyle(el).marginTop) || 0;
+    el.style.overflow = "hidden";
+    el.style.transition = "none";
+    el.style.height = naturalH + "px";
+    el.style.marginTop = computedMarginTop + "px";
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transition = `height ${duration}ms cubic-bezier(0.4, 0, 0.2, 1), margin-top ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+        el.style.height = "0px";
+        el.style.marginTop = "0px";
+        setTimeout(resolve, duration);
+      });
+    });
+  });
+}
+
 function useAnimatedHeight(switchKey) {
   const wrapRef = useRef(null);
   const prevKeyRef = useRef(switchKey);
@@ -668,8 +722,97 @@ function useAnimatedHeight(switchKey) {
           });
         }
         prevKeyRef.current = switchKey;
+        // 關鍵修正：直接沿用剛剛量到的、還沒被污染的 endH 當作下一次的基準值，不要在設定完
+        // explicit height 之後「順手」重新量一次 scrollHeight——scrollHeight 的定義是
+        // max(explicit 高度, 內容自然高度)，上面幾行剛把 explicit 高度設成「收合前」比較大的舊值，
+        // 這時候如果重新量 scrollHeight，量到的會是那個比較大的 explicit 值，不是新內容真正的
+        // 自然高度，導致下一次展開時的起點高度是錯的（收合類轉場之後，下一次展開瞬間跳過去、
+        // 沒有動畫感的根本原因）。
+        prevHeightRef.current = endH;
+      } else if (prevHeightRef.current == null) {
+        // 只有第一次掛載、從來沒有初始化過才需要量一次；平常沒有觸發新轉場的話完全不重新量，
+        // 沿用上一次已知正確的值，避免在動畫進行中被同樣的 max(explicit, 自然高度) 問題污染
+        prevHeightRef.current = el.scrollHeight;
       }
-      prevHeightRef.current = el.scrollHeight; // 每次 render 完都存一份目前高度，供「下一次」切換時當動畫起點
+    }
+  });
+
+  useEffect(() => () => clearPending(), []);
+
+  return wrapRef;
+}
+
+// 專門給「下方 footer 展開/收合時，要連動把上面內文區域的捲動位置也一起推」用的版本。
+// 跟 useAnimatedHeight 分開寫，不是共用同一個 hook 改參數——這是因為瀏覽器有個叫「捲動錨定
+// scroll anchoring」的機制，會在版面上方內容位移時，自己嘗試（用啟發式規則，不保證每次都觸發）
+// 幫你把捲動位置補償回來，讓畫面看起來沒跳動。這正好符合「有時候會同步推上去，有時候不會」的症狀——
+// 因為那個補償行為不是我們自己控制的，是瀏覽器自己判斷要不要做。這裡改成自己動手明確控制捲動位置，
+// 不依賴瀏覽器的捲動錨定啟發式，跟高度動畫用同一個時長、同一條曲線，確保每一次都會同步、不會忽有忽無。
+function useFooterPushAnimation(switchKey, bodyScrollRef) {
+  const wrapRef = useRef(null);
+  const prevKeyRef = useRef(switchKey);
+  const prevHeightRef = useRef(null);
+  const timerRef = useRef(null);
+  const rafRef1 = useRef(null);
+  const rafRef2 = useRef(null);
+  const scrollRafRef = useRef(null);
+
+  function clearPending() {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (rafRef1.current) { cancelAnimationFrame(rafRef1.current); rafRef1.current = null; }
+    if (rafRef2.current) { cancelAnimationFrame(rafRef2.current); rafRef2.current = null; }
+    if (scrollRafRef.current) { cancelAnimationFrame(scrollRafRef.current); scrollRafRef.current = null; }
+  }
+
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (el) {
+      el.style.overflow = "hidden";
+      if (prevKeyRef.current !== switchKey) {
+        const startH = prevHeightRef.current;
+        const endH = el.scrollHeight; // 這時候還沒動過 el.style.height，量到的是新內容真正的自然高度，可靠
+        clearPending();
+        if (startH != null) {
+          const distance = Math.abs(endH - startH);
+          const duration = Math.max(200, Math.min(500, Math.round(300 * Math.sqrt(distance / 70 || 0.01))));
+          el.style.transition = "none";
+          el.style.height = startH + "px";
+          const bodyEl = bodyScrollRef?.current;
+          const scrollStart = bodyEl ? bodyEl.scrollTop : null;
+          rafRef1.current = requestAnimationFrame(() => {
+            rafRef2.current = requestAnimationFrame(() => {
+              el.style.transition = `height ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+              el.style.height = endH + "px";
+              timerRef.current = setTimeout(() => { el.style.height = "auto"; }, duration);
+              if (bodyEl && scrollStart != null) {
+                // footer 長高多少，上面的內文就跟著多捲進去多少（等於整段內容往上被推走）；
+                // footer 收合變矮，反過來往回捲同樣的量——正負號跟高度差距本身一致，不用另外判斷方向
+                const scrollDelta = endH - startH;
+                const scrollStartTime = performance.now();
+                function scrollStep(now) {
+                  const progress = Math.min((now - scrollStartTime) / duration, 1);
+                  bodyEl.scrollTop = scrollStart + scrollDelta * materialEasing(progress);
+                  if (progress < 1) scrollRafRef.current = requestAnimationFrame(scrollStep);
+                }
+                scrollRafRef.current = requestAnimationFrame(scrollStep);
+              }
+            });
+          });
+        }
+        prevKeyRef.current = switchKey;
+        // 關鍵修正：直接沿用剛剛量到的、還沒被污染的 endH 當作下一次的基準值，不要在設定完
+        // explicit height 之後「順手」重新量一次 scrollHeight——scrollHeight 的定義是
+        // max(explicit 高度, 內容自然高度)，這一行剛把 explicit 高度設成「收合前」比較大的舊值
+        // （el.style.height = startH + "px"），如果這時候重新量 scrollHeight，量到的會是那個
+        // 比較大的 explicit 值，不是新內容真正的自然高度，導致下一次展開時的起點高度是錯的
+        // （這正是「開→關→再開」在收合類型的轉場之後，第二次展開量到錯誤基準值、變成瞬間跳過去
+        // 沒有動畫感的真正原因）。
+        prevHeightRef.current = endH;
+      } else if (prevHeightRef.current == null) {
+        // 只有第一次掛載、從來沒有初始化過才需要量一次；平常沒有觸發新轉場的話完全不重新量，
+        // 沿用上一次已知正確的值，避免在動畫進行中被同樣的 max(explicit, 自然高度) 問題污染
+        prevHeightRef.current = el.scrollHeight;
+      }
     }
   });
 
@@ -2434,6 +2577,22 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [mission, setMission] = useState(null);
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
+  const checklistRowRefsMap = useRef(new Map()); // 每一列 checklist 項目的 DOM 節點，新增/刪除動畫都要用
+  const seenChecklistIdsRef = useRef(null); // null=尚未初始化；用來分辨「真的是新增的項目」，避免打勾/編輯這類更新也誤觸長高動畫
+  useEffect(() => {
+    const currentIds = new Set(checklist.map(i => i.id));
+    if (seenChecklistIdsRef.current === null) {
+      // 第一次掛載，只記錄現有項目，不要播放動畫——不然任務內頁一打開，所有清單項目會一起跑一次長高動畫
+      seenChecklistIdsRef.current = currentIds;
+      return;
+    }
+    const newIds = [...currentIds].filter(id => !seenChecklistIdsRef.current.has(id));
+    seenChecklistIdsRef.current = currentIds;
+    newIds.forEach(id => {
+      const el = checklistRowRefsMap.current.get(id);
+      if (el) growRowIn(el);
+    });
+  }, [checklist]);
   const [newChecklistText, setNewChecklistText] = useState("");
   const [editingChecklistId, setEditingChecklistId] = useState(null);
   const [reorderChecklistMode, setReorderChecklistMode] = useState(false);
@@ -2448,13 +2607,15 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [finalComment, setFinalComment] = useState("");
   const [waitingReasonInput, setWaitingReasonInput] = useState("");
   const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
-  // footer 現在有三種內容：按鈕列/更新任務表單/狀態切換表單，三者用同一個 key 互斥切換，同時只會有一種展開動畫在跑
+  const bodyScrollRef = useRef(null); // 整個彈窗可捲動內文區域，「編輯本文」按下時要捲到最上方提示使用者，footer 展開/收合時也要跟它連動
+  // footer 現在有三種內容：按鈕列/更新任務表單/狀態切換表單，三者用同一個 key 互斥切換，同時只會有一種展開動畫在跑。
+  // 用 useFooterPushAnimation（不是一般的 useAnimatedHeight），讓 footer 展開/收合時，
+  // 上面的內文捲動位置會同步被推走，不依賴瀏覽器的捲動錨定啟發式
   const footerMode = showReplyForm ? "reply" : (pendingStatus === null ? "buttons" : "status");
-  const statusFooterAnimRef = useAnimatedHeight(footerMode);
+  const statusFooterAnimRef = useFooterPushAnimation(footerMode, bodyScrollRef);
   const [statusChangeErr, setStatusChangeErr] = useState(null); // 狀態切換專用的錯誤訊息，跟通用的 err 分開，就近顯示在「確認切換」旁邊
   const [editingBody, setEditingBody] = useState(false);
   const editBodyAnimRef = useAnimatedHeight(editingBody);
-  const bodyScrollRef = useRef(null); // 整個彈窗可捲動內文區域，「編輯本文」按下時要捲到最上方提示使用者
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editContentOpen, setEditContentOpen] = useState(false);
@@ -2608,6 +2769,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const updateLogScrollRef = useRef(null);
   const updateLogScrollTriggerRef = useRef(null);
   const latestRowRef = useRef(null);
+  const rowRefsMap = useRef(new Map()); // 每一列的 DOM 節點，用留言 id 當 key——刪除任何一列時（不只是最新那筆）都要找得到對應的元素才能播放縮小動畫
+  const prevLatestIdRef = useRef(undefined); // undefined=尚未初始化；用來分辨「真的有新一筆」還是「只是排序方向切換、最新那筆還是同一筆」
   useEffect(() => {
     const el = updateLogScrollRef.current;
     if (!el) return;
@@ -2615,10 +2778,20 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     const isFirstRun = updateLogScrollTriggerRef.current === null;
     if (updateLogScrollTriggerRef.current === triggerKey) return;
     updateLogScrollTriggerRef.current = triggerKey;
+
+    // 「最新那筆」的 id 真的換人了，才算是新送出的一筆；如果只是排序方向切換、id 沒變，
+    // 就只是同一筆換位置而已，不用播放「新插入」的長高動畫，只要捲動+閃爍提醒就好
+    const isNewRecord = prevLatestIdRef.current !== undefined && prevLatestIdRef.current !== latestUpdateLogId;
+    prevLatestIdRef.current = latestUpdateLogId;
+
     const target = (updateLogSortOrder || "desc") === "desc" ? 0 : el.scrollHeight;
     if (isFirstRun) { el.scrollTop = target; return; } // 第一次掛載直接定位，不用播過場動畫、也不用閃爍
     smoothScrollTo(el, target, 500);
     runGlowPulse(latestRowRef.current, effectiveGlow); // 觸發時機二：排序方向切換或有新的一筆送出，都算「有新東西要提醒你看」
+    // 真的有新一筆送出時，不管是「新到舊」插在最上面、還是「舊到新」插在最下面，都讓那一列從 0
+    // 長高進來，旁邊的紀錄會被正常排版自然推開，兩種排序方向現在都有「被推進來」的動態感，不是只有
+    // 「舊到新」因為捲動效果剛好順眼、「新到舊」卻因為本來就在頂部、捲動距離是 0 而顯得突兀地直接冒出來
+    if (isNewRecord) growRowIn(latestRowRef.current);
   }, [updateLogSortOrder, latestUpdateLogId]);
 
   // 觸發時機三：捲動讓最新那筆完整進入可視範圍（不管是往下捲進去、還是往上捲回去），才閃一次。
@@ -2670,6 +2843,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   async function deleteUpdate() {
     const updateId = confirmDeleteUpdateId;
     setConfirmDeleteUpdateId(null);
+    const rowEl = rowRefsMap.current.get(updateId);
+    if (rowEl) await shrinkRowOut(rowEl); // 先把那一列縮小到 0，下面的列自然被排版擠上來填補空隙，播完才真的送出刪除
     const { error } = await sb.from("mission_updates").delete().eq("id", updateId);
     if (error) setErr(error.message);
     else await load();
@@ -2699,6 +2874,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   }
   async function deleteChecklistItem(id) {
     setChecklistErr(null);
+    const el = checklistRowRefsMap.current.get(id);
+    if (el) await shrinkRowOut(el);
     const removed = checklist.find(i => i.id === id);
     setChecklist(list => list.filter(i => i.id !== id));
     const { error } = await sb.from("mission_checklist_items").delete().eq("id", id);
@@ -2939,6 +3116,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   // 讓「並排、互相推來推去」的操作跟新增任務時的雙欄邏輯一致
   async function sendChecklistItemToSuggestions(item) {
     setChecklistErr(null);
+    const el = checklistRowRefsMap.current.get(item.id);
+    if (el) await shrinkRowOut(el);
     setChecklist(list => list.filter(i => i.id !== item.id));
     const { error } = await sb.from("mission_checklist_items").delete().eq("id", item.id);
     if (error) {
@@ -3510,7 +3689,10 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                     const detailOpen = detailChecklistId === item.id;
                     return (
                       <React.Fragment key={item.id}>
-                      <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
+                      <div ref={el => {
+                          if (el) checklistRowRefsMap.current.set(item.id, el);
+                          else checklistRowRefsMap.current.delete(item.id);
+                        }} className="flex items-center gap-2 bg-slate-50 rounded-lg px-3 py-2">
                         <input type="checkbox" checked={item.is_checked} disabled={!canToggleChecklist}
                           onChange={() => toggleChecklistItem(item)} className="w-4 h-4" />
                         {isEditing ? (
@@ -3650,8 +3832,21 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           <div ref={updateLogScrollRef} className="space-y-2 max-h-56 overflow-y-auto pr-1">
             {sortedUpdateLogs.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
             {sortedUpdateLogs.map(u => (
-              <div key={u.id} ref={u.id === latestUpdateLogId ? latestRowRef : null} className="bg-slate-50 rounded-lg px-3 py-2"
-                style={u.id === latestUpdateLogId ? { boxShadow: (() => { const c = hexToRgb(effectiveGlow.color); return `inset 0 0 25px 0px rgba(${c.r}, ${c.g}, ${c.b}, ${effectiveGlow.minOpacity})`; })() } : undefined}>
+              <div key={u.id}
+                ref={el => {
+                  if (el) rowRefsMap.current.set(u.id, el);
+                  else rowRefsMap.current.delete(u.id);
+                  if (u.id === latestUpdateLogId) latestRowRef.current = el;
+                }}
+                className="bg-slate-50 rounded-lg px-3 py-2"
+                style={u.id === latestUpdateLogId ? {
+                  boxShadow: (() => { const c = hexToRgb(effectiveGlow.color); return `inset 0 0 25px 0px rgba(${c.r}, ${c.g}, ${c.b}, ${effectiveGlow.minOpacity})`; })(),
+                  // 內容靠底部對齊，不是預設的靠頂部——長高動畫進行中，文字才會跟著「正在變高的那個邊」
+                  // 一起往下移動、看起來像被推進定位，而不是文字釘在固定位置、只是被逐漸露出來而已。
+                  // 高度到達自然高度、動畫播完之後，內容本來就剛好填滿整個框，靠底部對齊完全不影響
+                  // 靜止狀態下的外觀，平常留著也沒差，不用動畫播完再切回來
+                  display: "flex", flexDirection: "column", justifyContent: "flex-end",
+                } : undefined}>
                 <div className="text-xs text-slate-400 mb-1">
                   {u.is_system ? "System" : u.author?.display_name} ({fmt(u.created_at)})
                 </div>
