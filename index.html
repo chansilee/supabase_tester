@@ -587,6 +587,41 @@ function smoothScrollTo(el, targetTop, duration = 500) {
   requestAnimationFrame(step);
 }
 
+function hexToRgb(hex) {
+  const n = parseInt((hex || "#ffff00").replace("#", ""), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+// 內發光閃爍動畫：每個週期都是 minOpacity → maxOpacity → minOpacity（三角波，不是瞬間切換），
+// 重複 count 次之後停在 minOpacity（常態）。直接用 requestAnimationFrame 算每一幀該用的透明度、
+// imperatively 寫回 el.style.boxShadow，不透過 React state（動畫過程不需要、也不應該觸發重新渲染），
+// 不用 CSS keyframes 是因為顏色/次數/週期/強度全部是使用者可調整的動態值，CSS 沒辦法乾淨地參數化這些。
+function runGlowPulse(el, { color, period, count, minOpacity, maxOpacity }) {
+  if (!el) return;
+  // 排序切換的時候，捲動動畫過程中最新那一列的可見比例也會經過「完整可見」這個瞬間，
+  // 讓 IntersectionObserver 也跟著觸發一次——這樣同一個事件會從兩條路徑（排序變化 + 捲動進入視窗）
+  // 各自呼叫一次 runGlowPulse，兩個 requestAnimationFrame 迴圈同時搶著寫同一個元素的 boxShadow，
+  // 疊出「多閃一次、第一次特別短促」的畫面。用元素本身的一個旗標擋住：已經有一個閃爍在跑的話，
+  // 後來這次直接略過，不疊加新的動畫迴圈，讓正在跑的那個好好跑完它自己的完整次數。
+  if (el._glowActive) return;
+  el._glowActive = true;
+  const { r, g, b } = hexToRgb(color);
+  const periodMs = (period || 1) * 1000;
+  const totalMs = periodMs * (count || 3);
+  const startTime = performance.now();
+  function setAlpha(a) {
+    el.style.boxShadow = `inset 0 0 25px 0px rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  function step(now) {
+    const elapsed = now - startTime;
+    if (elapsed >= totalMs) { setAlpha(minOpacity); el._glowActive = false; return; }
+    const cycleProgress = (elapsed % periodMs) / periodMs; // 0~1，這個週期內的進度
+    const triangle = cycleProgress <= 0.5 ? cycleProgress * 2 : (1 - cycleProgress) * 2; // 三角波：0→1→0
+    setAlpha(minOpacity + (maxOpacity - minOpacity) * triangle);
+    requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 function useAnimatedHeight(switchKey) {
   const wrapRef = useRef(null);
   const prevKeyRef = useRef(switchKey);
@@ -610,6 +645,13 @@ function useAnimatedHeight(switchKey) {
         const endH = el.scrollHeight;
         clearPending();
         if (startH != null) {
+          // 動畫時長跟著實際要跑的高度差距縮放，不是固定 300ms——不然像「更新任務」這種展開後
+          // 差距特別大的（5 行文字框，落差常常是「標記為已完成」那種 2 行表單的兩倍以上），
+          // 固定時間內要跑的距離變大，速度感自然就跟其他按鈕不一樣，看起來像彈力不同、其實只是
+          // 同樣時間內跑得比較快。用距離的平方根去縮放時長（Material Design 建議的做法），
+          // 讓「感覺上的移動速度」在不同距離的展開/收合之間維持一致，同時夾住上下限避免極端值。
+          const distance = Math.abs(endH - startH);
+          const duration = Math.max(200, Math.min(500, Math.round(300 * Math.sqrt(distance / 70 || 0.01))));
           el.style.transition = "none";
           el.style.height = startH + "px";
           // 用兩層 requestAnimationFrame 取代單純強制 reflow（getBoundingClientRect）——
@@ -619,9 +661,9 @@ function useAnimatedHeight(switchKey) {
           // 設定目標值」，這是業界處理這類重複觸發轉場問題的標準做法。
           rafRef1.current = requestAnimationFrame(() => {
             rafRef2.current = requestAnimationFrame(() => {
-              el.style.transition = "height 300ms cubic-bezier(0.4, 0, 0.2, 1)";
+              el.style.transition = `height ${duration}ms cubic-bezier(0.4, 0, 0.2, 1)`;
               el.style.height = endH + "px";
-              timerRef.current = setTimeout(() => { el.style.height = "auto"; }, 300);
+              timerRef.current = setTimeout(() => { el.style.height = "auto"; }, duration);
             });
           });
         }
@@ -1397,6 +1439,9 @@ const CATEGORY_EMOJI = {
   work: "💼", finance: "💰", chores: "🧹", health: "🏥", family: "🏠",
   social: "🎉", learning: "📚", travel: "✈️", admin: "📋", other: "🗂️",
 };
+// 「更新紀錄」最新一筆內發光閃爍動畫的預設值，profiles.glow_settings 沒有值（例如剛跑完 migration
+// 還沒存過）時用這組；跟資料庫欄位的 default 值保持一致
+const DEFAULT_GLOW_SETTINGS = { color: "#ffff00", count: 3, period: 1, maxOpacity: 0.5, minOpacity: 0 };
 const CATEGORY_CARD_COLOR = {
   work: "#3b82f6", finance: "#10b981", chores: "#f59e0b", health: "#ef4444", family: "#f97316",
   social: "#ec4899", learning: "#8b5cf6", travel: "#06b6d4", admin: "#64748b", other: "#94a3b8",
@@ -2380,7 +2425,7 @@ function ProjectPickerModal({ projects, onPick, onClose }) {
   );
 }
 
-function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, workSubDimension, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
+function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabels, priorityDisplay, scaleDisplay, priorityColorOverride, scaleColorOverride, urgencyDisplay, urgencyLabels, urgencyColorOverride, friendProfiles, dueDateDisplayDetail, dueDateColorOverride, projects, showSystemLogs, onToggleShowSystemLogs, updateLogSortOrder, onToggleUpdateLogSortOrder, fieldLabelPrefix, categoryDisplay, categoryEmojiOverride, workSubDimension, glowSettings, isStarred, onStar, onUnstar, onDelete, aiBanned, onClose, onChanged }) {
   const { style: popStyle, className: popClassName, requestClose } = usePopModalAnimation();
   // 刪除任務走模式二（不用縮回按鈕原位置）：跟一般關閉（X／編輯完成）分開追蹤，
   // 兩種關閉方式的動畫 class 互斥，用 deleteClosing 這個旗標決定當下該套用哪一種
@@ -2396,17 +2441,20 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [checklistErr, setChecklistErr] = useState(null);
   const [projectMembers, setProjectMembers] = useState([]);
   const [replyText, setReplyText] = useState("");
-  // 「更新任務」文字框：一開始只有 2 行，點進去（focus）就展開到 5 行，
-  // 之後除了整個彈窗關閉，不會再縮回原本行數（一旦展開只加不減）
-  const [replyExpanded, setReplyExpanded] = useState(false);
-  const replyAnimRef = useAnimatedHeight(replyExpanded);
+  // 「更新任務」現在整合進下面固定 footer，跟狀態切換共用同一套推展動畫，按下就直接展開到 5 行，
+  // 不用像以前那樣先聚焦才展開
+  const [showReplyForm, setShowReplyForm] = useState(false);
+  const [replyErr, setReplyErr] = useState(null);
   const [finalComment, setFinalComment] = useState("");
   const [waitingReasonInput, setWaitingReasonInput] = useState("");
   const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
-  const statusFooterAnimRef = useAnimatedHeight(pendingStatus === null ? "buttons" : "form");
+  // footer 現在有三種內容：按鈕列/更新任務表單/狀態切換表單，三者用同一個 key 互斥切換，同時只會有一種展開動畫在跑
+  const footerMode = showReplyForm ? "reply" : (pendingStatus === null ? "buttons" : "status");
+  const statusFooterAnimRef = useAnimatedHeight(footerMode);
   const [statusChangeErr, setStatusChangeErr] = useState(null); // 狀態切換專用的錯誤訊息，跟通用的 err 分開，就近顯示在「確認切換」旁邊
   const [editingBody, setEditingBody] = useState(false);
   const editBodyAnimRef = useAnimatedHeight(editingBody);
+  const bodyScrollRef = useRef(null); // 整個彈窗可捲動內文區域，「編輯本文」按下時要捲到最上方提示使用者
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editContentOpen, setEditContentOpen] = useState(false);
@@ -2555,8 +2603,11 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const latestUpdateLogId = sortedUpdateLogs.reduce((latest, u) =>
     (!latest || new Date(u.created_at) > new Date(latest.created_at)) ? u : latest, null)?.id;
 
+  const effectiveGlow = glowSettings || DEFAULT_GLOW_SETTINGS;
+
   const updateLogScrollRef = useRef(null);
   const updateLogScrollTriggerRef = useRef(null);
+  const latestRowRef = useRef(null);
   useEffect(() => {
     const el = updateLogScrollRef.current;
     if (!el) return;
@@ -2565,9 +2616,27 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     if (updateLogScrollTriggerRef.current === triggerKey) return;
     updateLogScrollTriggerRef.current = triggerKey;
     const target = (updateLogSortOrder || "desc") === "desc" ? 0 : el.scrollHeight;
-    if (isFirstRun) { el.scrollTop = target; return; } // 第一次掛載直接定位，不用播過場動畫
+    if (isFirstRun) { el.scrollTop = target; return; } // 第一次掛載直接定位，不用播過場動畫、也不用閃爍
     smoothScrollTo(el, target, 500);
+    runGlowPulse(latestRowRef.current, effectiveGlow); // 觸發時機二：排序方向切換或有新的一筆送出，都算「有新東西要提醒你看」
   }, [updateLogSortOrder, latestUpdateLogId]);
+
+  // 觸發時機三：捲動讓最新那筆完整進入可視範圍（不管是往下捲進去、還是往上捲回去），才閃一次。
+  // root 設成更新紀錄自己的捲動容器，不是瀏覽器視窗——這是內部小捲動區，不是整頁捲動。
+  // threshold 用 0.999 而不是 1（浮點數誤差偶爾會讓瀏覽器算出來的比例卡在 0.999xxx，永遠到不了剛好 1.0）
+  useEffect(() => {
+    const target = latestRowRef.current;
+    const root = updateLogScrollRef.current;
+    if (!target || !root) return;
+    let wasFullyVisible = false;
+    const observer = new IntersectionObserver(([entry]) => {
+      const isFullyVisible = entry.isIntersecting && entry.intersectionRatio >= 0.999;
+      if (isFullyVisible && !wasFullyVisible) runGlowPulse(target, effectiveGlow);
+      wasFullyVisible = isFullyVisible;
+    }, { root, threshold: 0.999 });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [latestUpdateLogId, effectiveGlow]);
 
   if (!mission) return null;
   const normalizedWorkDim = Array.isArray(mission.work_dimensions) ? mission.work_dimensions[0] : mission.work_dimensions;
@@ -2576,8 +2645,6 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const isAssignee = mission.assigned_id === currentUser.id;
   const isClosed = mission.status === "completed" || mission.status === "abandoned";
   const canToggleChecklist = (isCreator || isAssignee) && !isClosed;
-  // 誰能看得到，誰就能回覆更新（跟資料庫 RLS 的可見範圍規則一致）
-  const canReply = mission.status !== "completed" && mission.status !== "abandoned";
   const typeLabel = mission.project_id ? "專案任務" : (mission.assigned_id === mission.creator_id ? "私人任務" : "私人指派任務");
   // 編輯時可選的指派對象：專案任務只能選專案成員；個人任務只能選自己或好友
   const assigneeChoices = mission.project_id
@@ -2585,17 +2652,19 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     : [{ id: currentUser.id, display_name: "我自己" }, ...(friendProfiles || [])];
 
   async function submitReply(e) {
-    e.preventDefault();
-    setBusy(true); setErr(null);
+    if (e) e.preventDefault();
+    if (!replyText.trim()) { setReplyErr("更新內容不能為空"); return; }
+    setBusy(true); setReplyErr(null);
     try {
       const { error } = await sb.from("mission_updates").insert({
         mission_id: missionId, author_id: currentUser.id, content: replyText,
       });
       if (error) throw error;
       setReplyText("");
+      setShowReplyForm(false);
       await load();
       onChanged();
-    } catch (e2) { setErr(e2.message); } finally { setBusy(false); }
+    } catch (e2) { setReplyErr(e2.message); } finally { setBusy(false); }
   }
 
   async function deleteUpdate() {
@@ -2982,8 +3051,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                   )
                 )}
                 {isCreator && !isClosed && (
-                  <button onClick={() => setEditingBody(true)} title="編輯本文"
-                    className="flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg w-9 h-9">
+                  <button onClick={() => { setEditingBody(true); smoothScrollTo(bodyScrollRef.current, 0, 500); }} title="編輯本文"
+                    className={"flex items-center justify-center rounded-lg w-9 h-9 " + (editingBody ? "bg-blue-600 text-white" : "bg-slate-100 hover:bg-slate-200 text-slate-600")}>
                     <Icon.Edit className="w-4 h-4" />
                   </button>
                 )}
@@ -2998,7 +3067,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           </div>
         </div>
 
-        <div className="overflow-y-auto flex-1 px-6 pb-6 pt-4">
+        <div ref={bodyScrollRef} className="overflow-y-auto flex-1 px-6 pb-6 pt-4">
         <div ref={editBodyAnimRef}>
         {!editingBody ? (
           <div>
@@ -3581,7 +3650,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
           <div ref={updateLogScrollRef} className="space-y-2 max-h-56 overflow-y-auto pr-1">
             {sortedUpdateLogs.length === 0 && <p className="text-xs text-slate-400">尚無更新紀錄</p>}
             {sortedUpdateLogs.map(u => (
-              <div key={u.id} className="bg-slate-50 rounded-lg px-3 py-2" style={u.id === latestUpdateLogId ? { boxShadow: "inset 0 0 25px 0px rgba(255, 255, 0, 0.5)" } : undefined}>
+              <div key={u.id} ref={u.id === latestUpdateLogId ? latestRowRef : null} className="bg-slate-50 rounded-lg px-3 py-2"
+                style={u.id === latestUpdateLogId ? { boxShadow: (() => { const c = hexToRgb(effectiveGlow.color); return `inset 0 0 25px 0px rgba(${c.r}, ${c.g}, ${c.b}, ${effectiveGlow.minOpacity})`; })() } : undefined}>
                 <div className="text-xs text-slate-400 mb-1">
                   {u.is_system ? "System" : u.author?.display_name} ({fmt(u.created_at)})
                 </div>
@@ -3639,34 +3709,34 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
         )}
 
         {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-3">{err}</div>}
-
-        {canReply && (
-          <form onSubmit={submitReply} className="mt-4 border-t border-slate-200 pt-3">
-            <label className="text-xs text-slate-500">{fieldLabelPrefix}更新任務</label>
-            <div ref={replyAnimRef}>
-              <textarea required rows={replyExpanded ? 5 : 2} value={replyText} onChange={e => setReplyText(e.target.value)}
-                onFocus={() => setReplyExpanded(true)}
-                placeholder="輸入更新內容…" className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <button disabled={busy} className="mt-2 bg-blue-600 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">送出更新</button>
-          </form>
-        )}
         </div>
 
-        {(isCreator || isAssignee) && (mission.status === "added" || mission.status === "in_progress" || mission.status === "waiting") && (
+        {!isClosed && (
           <div className="border-t border-slate-200 px-6 py-3 shrink-0">
             <div ref={statusFooterAnimRef}>
-            {!pendingStatus ? (
+            {footerMode === "buttons" ? (
               <div className="flex gap-2">
+                <button onClick={() => { setShowReplyForm(true); setReplyErr(null); }} className="text-xs bg-blue-600 text-white rounded-lg px-3 py-1.5">更新任務</button>
                 {isCreator && (
                   <button onClick={() => { setPendingStatus("completed"); setStatusChangeErr(null); }} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">標記為已完成</button>
                 )}
-                {mission.status !== "waiting" && (
+                {(isCreator || isAssignee) && mission.status !== "waiting" && (
                   <button onClick={() => { setPendingStatus("waiting"); setStatusChangeErr(null); }} className="text-xs bg-amber-500 text-white rounded-lg px-3 py-1.5">標記為等待中</button>
                 )}
                 {isCreator && (
                   <button onClick={() => { setPendingStatus("abandoned"); setStatusChangeErr(null); }} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">標記為已棄置</button>
                 )}
+              </div>
+            ) : footerMode === "reply" ? (
+              <div className="space-y-2">
+                <textarea rows={5} value={replyText} onChange={e => setReplyText(e.target.value)}
+                  placeholder="請輸入欲更新之內容…"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+                <div className="flex items-center gap-2">
+                  <button onClick={submitReply} disabled={busy} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5">送出更新</button>
+                  <button onClick={() => { setShowReplyForm(false); setReplyText(""); setReplyErr(null); }} className="text-xs text-slate-500 px-3 py-1.5">取消</button>
+                  {replyErr && <span className="text-xs text-rose-600">{replyErr}</span>}
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -4214,6 +4284,35 @@ function SettingsView({ profile, onProfileChange }) {
   );
   const [savingCategoryDisplay, setSavingCategoryDisplay] = useState(false);
   const [invalidEmojiNotice, setInvalidEmojiNotice] = useState(null); // 存檔時被棄置成預設值的分類清單，存完跳彈窗提醒
+
+  const glowSettings = profile.glow_settings || DEFAULT_GLOW_SETTINGS;
+  const [editingGlow, setEditingGlow] = useState(false);
+  const [glowDraft, setGlowDraft] = useState(glowSettings);
+  const [savingGlow, setSavingGlow] = useState(false);
+
+  function startEditGlow() {
+    setGlowDraft(glowSettings);
+    setEditingGlow(true);
+  }
+  function updateGlowDraft(patch) {
+    setGlowDraft(d => {
+      const next = { ...d, ...patch };
+      // 最低強度不能超過最亮強度——最亮強度往下調的時候，最低強度要跟著夾住，不然滑桿會出現「最低比最亮還亮」的怪狀態
+      if (next.minOpacity > next.maxOpacity) next.minOpacity = next.maxOpacity;
+      return next;
+    });
+  }
+  async function saveGlowSettings() {
+    setSavingGlow(true);
+    const { error } = await sb.from("profiles").update({ glow_settings: glowDraft }).eq("id", profile.id);
+    setSavingGlow(false);
+    if (!error) {
+      onProfileChange({ ...profile, glow_settings: glowDraft });
+      setEditingGlow(false);
+    } else {
+      setMsg({ type: "err", text: error.message });
+    }
+  }
 
   function startEditCategoryDisplay() {
     setCategoryDisplayDraft(categoryDisplay);
@@ -4866,7 +4965,7 @@ function SettingsView({ profile, onProfileChange }) {
           </div>
         </div>
 
-        <div className="grid gap-4 mt-4 pt-4 border-t border-slate-100">
+        <div className="grid md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100">
           <div className="bg-slate-50 rounded-2xl p-4">
             <div className="flex justify-between items-center mb-2">
               <h4 className="text-sm font-semibold text-slate-700">類別顯示</h4>
@@ -4943,6 +5042,85 @@ function SettingsView({ profile, onProfileChange }) {
               <div className="flex gap-2 mt-3">
                 <button onClick={saveCategoryDisplay} disabled={savingCategoryDisplay} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingCategoryDisplay ? "儲存中…" : "儲存"}</button>
                 <button onClick={() => setEditingCategoryDisplay(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl p-4">
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-sm font-semibold text-slate-700">畫面閃爍設定</h4>
+              {!editingGlow && <button onClick={startEditGlow} className="text-xs bg-white rounded-lg px-3 py-1.5 shadow-sm">編輯</button>}
+            </div>
+            <p className="text-xs text-slate-500 mb-3">任務內頁「更新紀錄」最新一筆的內發光閃爍效果，用來提醒你有新的更新進來。</p>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between items-center">
+                <label className="text-slate-500">閃爍顏色</label>
+                {editingGlow ? (
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={glowDraft.color} onChange={e => updateGlowDraft({ color: e.target.value })}
+                      className="w-8 h-8 rounded cursor-pointer border border-slate-300" />
+                    <button onClick={() => updateGlowDraft({ color: DEFAULT_GLOW_SETTINGS.color })} className="text-xs bg-white rounded-lg px-2.5 py-1 shadow-sm">回到預設顏色</button>
+                  </div>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <span className="inline-block w-4 h-4 rounded border border-slate-300" style={{ background: glowSettings.color }} />
+                    {glowSettings.color}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center">
+                <label className="text-slate-500">閃爍次數</label>
+                {editingGlow ? (
+                  <select value={glowDraft.count} onChange={e => updateGlowDraft({ count: Number(e.target.value) })}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n} 次</option>)}
+                  </select>
+                ) : (
+                  <span className="font-medium">{glowSettings.count} 次</span>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center">
+                <label className="text-slate-500">閃爍週期</label>
+                {editingGlow ? (
+                  <select value={glowDraft.period} onChange={e => updateGlowDraft({ period: Number(e.target.value) })}
+                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
+                    <option value={0.5}>0.5 秒</option>
+                    <option value={1}>1 秒</option>
+                    <option value={2}>2 秒</option>
+                  </select>
+                ) : (
+                  <span className="font-medium">{glowSettings.period} 秒</span>
+                )}
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-slate-500">最亮光線強度</label>
+                  <span className="font-medium">{(editingGlow ? glowDraft.maxOpacity : glowSettings.maxOpacity).toFixed(2)}</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.05" disabled={!editingGlow}
+                  value={editingGlow ? glowDraft.maxOpacity : glowSettings.maxOpacity}
+                  onChange={e => updateGlowDraft({ maxOpacity: Number(e.target.value) })} className="w-full" />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-slate-500">最低光線強度</label>
+                  <span className="font-medium">{(editingGlow ? glowDraft.minOpacity : glowSettings.minOpacity).toFixed(2)}</span>
+                </div>
+                <input type="range" min="0" max={editingGlow ? glowDraft.maxOpacity : glowSettings.maxOpacity} step="0.05" disabled={!editingGlow}
+                  value={editingGlow ? glowDraft.minOpacity : glowSettings.minOpacity}
+                  onChange={e => updateGlowDraft({ minOpacity: Number(e.target.value) })} className="w-full" />
+              </div>
+            </div>
+
+            {editingGlow && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={saveGlowSettings} disabled={savingGlow} className="bg-slate-900 text-white text-xs rounded-lg px-4 py-2 disabled:opacity-50">{savingGlow ? "儲存中…" : "儲存"}</button>
+                <button onClick={() => setEditingGlow(false)} className="text-xs text-slate-500 px-4 py-2">取消</button>
               </div>
             )}
           </div>
@@ -7115,7 +7293,7 @@ function Dashboard({ session, profile, setProfile }) {
         />
       )}
       {openMissionId && (
-        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} workSubDimension={profile.work_sub_dimension} aiBanned={aiBanned}
+        <MissionDetailModal missionId={openMissionId} currentUser={session.user} priorityLabels={profile.priority_labels} scaleLabels={profile.scale_labels} priorityDisplay={profile.priority_display} scaleDisplay={profile.scale_display} priorityColorOverride={profile.priority_color_override} scaleColorOverride={profile.scale_color_override} urgencyDisplay={profile.urgency_display} urgencyLabels={profile.urgency_labels} urgencyColorOverride={profile.urgency_color_override} friendProfiles={friendProfiles} dueDateDisplayDetail={profile.due_date_display_detail} dueDateColorOverride={profile.due_date_color_override} projects={visibleProjects} showSystemLogs={profile.show_system_logs} onToggleShowSystemLogs={toggleShowSystemLogs} updateLogSortOrder={profile.update_log_sort_order} onToggleUpdateLogSortOrder={toggleUpdateLogSortOrder} fieldLabelPrefix={profile.field_label_prefix ?? "※"} categoryDisplay={profile.category_display || DEFAULT_CATEGORY_DISPLAY_MODES} categoryEmojiOverride={profile.category_emoji_override} workSubDimension={profile.work_sub_dimension} glowSettings={profile.glow_settings} aiBanned={aiBanned}
           isStarred={starredSet.has(openMissionId)} onStar={starMission} onUnstar={unstarMission} onDelete={deleteMission}
           onClose={() => setOpenMissionId(null)} onChanged={loadMissions} />
       )}
