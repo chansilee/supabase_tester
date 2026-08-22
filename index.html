@@ -2064,6 +2064,22 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [scaleLocked, setScaleLocked] = useState(false); // 使用者是否曾按過「🔒 手動輸入」明確鎖住
   const [assigneeId, setAssigneeId] = useState(currentUserId);
   const [checklistDraft, setChecklistDraft] = useState([]); // 左欄：已確定
+  const draftRowRefsMap = useRef(new Map()); // 每一列草稿子任務的 DOM 節點，用 _key 當 key——新增/刪除/從右欄匯入的動畫都要用
+  const seenDraftKeysRef = useRef(null); // null=尚未初始化；用來分辨「真的是新增的項目」（手動新增或從右欄匯入），避免其他更新誤觸長高動畫
+  useEffect(() => {
+    const currentKeys = new Set(checklistDraft.map(i => i._key));
+    if (seenDraftKeysRef.current === null) {
+      // 第一次掛載（例如從靈感池帶著初始標題進來，草稿一開始就非空）只記錄現有項目，不要播放動畫
+      seenDraftKeysRef.current = currentKeys;
+      return;
+    }
+    const newKeys = [...currentKeys].filter(k => !seenDraftKeysRef.current.has(k));
+    seenDraftKeysRef.current = currentKeys;
+    newKeys.forEach(k => {
+      const el = draftRowRefsMap.current.get(k);
+      if (el) growRowIn(el);
+    });
+  }, [checklistDraft]);
   const [checklistInput, setChecklistInput] = useState("");
   const [detailOpenKey, setDetailOpenKey] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]); // 右欄：AI 建議，尚未確認
@@ -2105,7 +2121,9 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     setChecklistDraft(list => [...list, newDraftItem(checklistInput.trim())]);
     setChecklistInput("");
   }
-  function removeChecklistDraftItem(key) {
+  async function removeChecklistDraftItem(key) {
+    const el = draftRowRefsMap.current.get(key);
+    if (el) await shrinkRowOut(el);
     setChecklistDraft(list => list.filter(i => i._key !== key));
   }
   function updateDraftItem(key, patch) {
@@ -2129,7 +2147,9 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
     })]);
   }
   // 左欄 AI 來源項目「→」：送回右欄建議（手動新增的項目沒有這個按鈕，只能移除）
-  function sendBackToSuggestions(item) {
+  async function sendBackToSuggestions(item) {
+    const el = draftRowRefsMap.current.get(item._key);
+    if (el) await shrinkRowOut(el);
     setChecklistDraft(list => list.filter(i => i._key !== item._key));
     setAiSuggestions(list => [...list, {
       _key: item._key, title: item.content, estimated_minutes: item.estimated_minutes,
@@ -2379,7 +2399,10 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                     const hasDetail = !!(it.estimated_minutes || it.requires_travel || it.wait_days_after);
                     return (
                       <React.Fragment key={it._key}>
-                        <div className="bg-slate-50 rounded-lg px-2.5 py-1.5">
+                        <div ref={el => {
+                            if (el) draftRowRefsMap.current.set(it._key, el);
+                            else draftRowRefsMap.current.delete(it._key);
+                          }} className="bg-slate-50 rounded-lg px-2.5 py-1.5">
                           <div className="flex items-center gap-1.5">
                             <span contentEditable suppressContentEditableWarning
                               onBlur={e => updateDraftItem(it._key, { content: e.target.textContent.trim() || it.content })}
