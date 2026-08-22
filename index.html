@@ -2065,6 +2065,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
   const [assigneeId, setAssigneeId] = useState(currentUserId);
   const [checklistDraft, setChecklistDraft] = useState([]); // 左欄：已確定
   const draftRowRefsMap = useRef(new Map()); // 每一列草稿子任務的 DOM 節點，用 _key 當 key——新增/刪除/從右欄匯入的動畫都要用
+  const detailRowRefsMap = useRef(new Map()); // 每一列「放大鏡」細節面板的 DOM 節點，展開/收合動畫用
   const seenDraftKeysRef = useRef(null); // null=尚未初始化；用來分辨「真的是新增的項目」（手動新增或從右欄匯入），避免其他更新誤觸長高動畫
   useEffect(() => {
     const currentKeys = new Set(checklistDraft.map(i => i._key));
@@ -2137,6 +2138,17 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
       [arr[index], arr[target]] = [arr[target], arr[index]];
       return arr;
     });
+  }
+  // 放大鏡細節面板：打開直接掛載（掛載瞬間透過 ref callback 觸發長高動畫，見下面 JSX）；
+  // 關閉要先播收合動畫，播完才真的把 detailOpenKey 設回 null（不然畫面上會瞬間消失，沒有動畫過程）
+  async function toggleDraftDetail(key) {
+    if (detailOpenKey === key) {
+      const el = detailRowRefsMap.current.get(key);
+      if (el) await shrinkRowOut(el);
+      setDetailOpenKey(null);
+    } else {
+      setDetailOpenKey(key);
+    }
   }
   // 右欄「←」：匯入左欄
   function importSuggestion(sugg) {
@@ -2410,7 +2422,7 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                               {it.content}
                             </span>
                             {it.from_ai && <span className="text-[10px] text-violet-400 shrink-0">✨</span>}
-                            <button type="button" onClick={() => setDetailOpenKey(detailOpen ? null : it._key)} title="時間／移動／等待細節"
+                            <button type="button" onClick={() => toggleDraftDetail(it._key)} title="時間／移動／等待細節"
                               className={"shrink-0 flex items-center justify-center w-5 h-5 rounded " + (detailOpen ? "bg-blue-100 text-blue-600" : hasDetail ? "text-blue-600 hover:text-blue-700" : "text-slate-400 hover:text-slate-600")}>
                               <Icon.Search className="w-3.5 h-3.5" />
                             </button>
@@ -2432,7 +2444,11 @@ function NewMissionModal({ onClose, onCreated, priorityLabels, scaleLabels, prio
                           </div>
                         </div>
                         {detailOpen && (
-                          <div className="flex flex-wrap items-center gap-2 bg-blue-50 rounded-lg px-2.5 py-1.5 -mt-1 text-xs text-slate-600">
+                          <div ref={el => {
+                              if (el) { if (!detailRowRefsMap.current.has(it._key)) growRowIn(el); detailRowRefsMap.current.set(it._key, el); }
+                              else detailRowRefsMap.current.delete(it._key);
+                            }}
+                            className="flex flex-wrap items-center gap-2 bg-blue-50 rounded-lg px-2.5 py-1.5 -mt-1 text-xs text-slate-600">
                             <label className="flex items-center gap-1">分鐘
                               <input type="number" min="0" value={it.estimated_minutes || ""}
                                 onChange={e => updateDraftItem(it._key, { estimated_minutes: e.target.value ? Number(e.target.value) : null })}
@@ -2605,6 +2621,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [updates, setUpdates] = useState([]);
   const [checklist, setChecklist] = useState([]);
   const checklistRowRefsMap = useRef(new Map()); // 每一列 checklist 項目的 DOM 節點，新增/刪除動畫都要用
+  const detailChecklistRowRefsMap = useRef(new Map()); // 每一列「放大鏡」細節面板的 DOM 節點，展開/收合動畫用
   const seenChecklistIdsRef = useRef(null); // null=尚未初始化；用來分辨「真的是新增的項目」，避免打勾/編輯這類更新也誤觸長高動畫
   useEffect(() => {
     const currentIds = new Set(checklist.map(i => i.id));
@@ -2937,6 +2954,17 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
       setChecklist(list => list.map(i => i.id === item.id ? { ...i, is_checked: item.is_checked } : i));
     } else {
       load();
+    }
+  }
+  // 放大鏡細節面板：打開直接掛載（掛載瞬間透過 ref callback 觸發長高動畫，見下面 JSX）；
+  // 關閉要先播收合動畫，播完才真的把 detailChecklistId 設回 null
+  async function toggleChecklistDetail(itemId) {
+    if (detailChecklistId === itemId) {
+      const el = detailChecklistRowRefsMap.current.get(itemId);
+      if (el) await shrinkRowOut(el);
+      setDetailChecklistId(null);
+    } else {
+      setDetailChecklistId(itemId);
     }
   }
   async function deleteChecklistItem(id) {
@@ -3777,7 +3805,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                           </span>
                         )}
                         {!reorderChecklistMode && canToggleChecklist && (
-                          <button onClick={() => setDetailChecklistId(detailOpen ? null : item.id)} title="時間／移動／等待細節"
+                          <button onClick={() => toggleChecklistDetail(item.id)} title="時間／移動／等待細節"
                             className={"flex items-center justify-center w-6 h-6 rounded-lg " + (detailOpen ? "bg-blue-100 text-blue-600" : hasDetail ? "text-blue-600 hover:text-blue-700" : "text-slate-400 hover:text-slate-600")}>
                             <Icon.Search className="w-3.5 h-3.5" />
                           </button>
@@ -3813,7 +3841,11 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
                         )}
                       </div>
                       {detailOpen && (
-                        <div className="flex flex-wrap items-center gap-3 bg-blue-50 rounded-lg px-3 py-2 -mt-1 text-xs text-slate-600">
+                        <div ref={el => {
+                            if (el) { if (!detailChecklistRowRefsMap.current.has(item.id)) growRowIn(el); detailChecklistRowRefsMap.current.set(item.id, el); }
+                            else detailChecklistRowRefsMap.current.delete(item.id);
+                          }}
+                          className="flex flex-wrap items-center gap-3 bg-blue-50 rounded-lg px-3 py-2 -mt-1 text-xs text-slate-600">
                           <label className="flex items-center gap-1.5">
                             分鐘數
                             <input type="number" min="0" value={item.estimated_minutes || ""} disabled={!canToggleChecklist}
