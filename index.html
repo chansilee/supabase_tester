@@ -836,15 +836,17 @@ const sb = (SUPABASE_URL.startsWith("http"))
 // =====================================================================
 // 共用常數
 // =====================================================================
-const STATUS_LABEL = { added: "已新增", in_progress: "進行中", waiting: "等待中", completed: "已完成", abandoned: "已棄置" };
+const STATUS_LABEL = { added: "已新增", in_progress: "進行中", waiting: "等待中", pending_completed: "暫時完成", pending_abandoned: "暫時棄置", completed: "已完成", abandoned: "已棄置" };
 const STATUS_COLOR = {
   added: "bg-slate-200 text-slate-700",
   in_progress: "bg-blue-100 text-blue-700",
   waiting: "bg-amber-100 text-amber-700",
+  pending_completed: "bg-emerald-100 text-emerald-700", // 顏色沿用「已完成」，只有字樣不同
+  pending_abandoned: "bg-rose-100 text-rose-700", // 顏色沿用「已棄置」，只有字樣不同
   completed: "bg-emerald-100 text-emerald-700",
   abandoned: "bg-rose-100 text-rose-700",
 };
-const STATUS_BAR_COLOR = { added: "#94a3b8", in_progress: "#3b82f6", waiting: "#f59e0b", completed: "#10b981", abandoned: "#f43f5e" };
+const STATUS_BAR_COLOR = { added: "#94a3b8", in_progress: "#3b82f6", waiting: "#f59e0b", pending_completed: "#10b981", pending_abandoned: "#f43f5e", completed: "#10b981", abandoned: "#f43f5e" };
 const TASK_LIST_COLUMNS = [
   { key: "created_at", label: "建立時間" },
   { key: "creator", label: "建立成員" },
@@ -1327,7 +1329,9 @@ function procrastinationTier(status) {
   if (status === "added") return 0;
   if (status === "in_progress") return 1;
   if (status === "waiting") return 2;
-  return 3;
+  if (status === "pending_completed") return 3;
+  if (status === "pending_abandoned") return 4;
+  return 5;
 }
 
 // 甘特圖用：判斷兩個日期是不是同一天（只比較年月日，忽略時分秒）
@@ -2606,7 +2610,28 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const [replyErr, setReplyErr] = useState(null);
   const [finalComment, setFinalComment] = useState("");
   const [waitingReasonInput, setWaitingReasonInput] = useState("");
-  const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned'
+  const [pendingStatus, setPendingStatus] = useState(null); // 'completed' | 'abandoned' | 'pending_completed' | 'pending_abandoned' | 'waiting'
+  // 暫時完成/暫時棄置的裁決：建立者[同意/不同意]、原回報人[取消回報]，三個都走同一個輕量確認彈窗，
+  // 按確定才會真的送出（避免手滑點錯），跟一般狀態切換那種要先填理由的表單是分開的兩條路
+  const [confirmPendingAction, setConfirmPendingAction] = useState(null); // 'agree' | 'disagree' | 'cancel_report' | null
+  const [pendingActionErr, setPendingActionErr] = useState(null);
+  async function resolvePendingAction() {
+    // 「同意」現在改走上面填理由那個表單（confirmStatusChange），讓建立者可以先看到／編輯被指派者
+    // 填的暫時評論再送出，不再是這裡的一鍵直接送出；這個函式現在只處理「不同意」跟「取消回報」，
+    // 兩者結果都一樣：退回進行中，final_comment 清空交給 DB trigger 自動處理，這裡不用重複處理
+    setConfirmPendingAction(null);
+    setBusy(true); setPendingActionErr(null);
+    try {
+      const { error } = await sb.from("missions").update({ status: "in_progress" }).eq("id", missionId);
+      if (error) throw error;
+      await load();
+      onChanged();
+    } catch (e) {
+      setPendingActionErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   const bodyScrollRef = useRef(null); // 整個彈窗可捲動內文區域，「編輯本文」按下時要捲到最上方提示使用者，footer 展開/收合時也要跟它連動
   // footer 現在有三種內容：按鈕列/更新任務表單/狀態切換表單，三者用同一個 key 互斥切換，同時只會有一種展開動畫在跑。
   // 用 useFooterPushAnimation（不是一般的 useAnimatedHeight），讓 footer 展開/收合時，
@@ -2817,6 +2842,14 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
   const isCreator = mission.creator_id === currentUser.id;
   const isAssignee = mission.assigned_id === currentUser.id;
   const isClosed = mission.status === "completed" || mission.status === "abandoned";
+  // 暫時完成/暫時棄置：被指派者回報後，等待建立者裁決期間的「凍結」狀態——這兩個是「未結案」狀態
+  // （statusTier() 預設非 completed/abandoned 都算未結案，這裡自然吃到，不用改 statusTier 本身），
+  // 但期間任何人都不能再留言、不能再動檢查清單，只有建立者的同意/不同意、或原回報人的取消回報能解開。
+  const isTaskPending = mission.status === "pending_completed" || mission.status === "pending_abandoned";
+  // 只有「目前仍是被指派者」而且「當初就是自己送出這筆回報」兩個條件同時成立，才能看到取消回報按鈕——
+  // 轉指派給別人之後，原回報人就算還記得自己回報過，也不再符合 isAssignee，這裡自然被擋掉
+  // （跟資料庫那邊 restrict_assignee_status_update 的 RLS 判斷邏輯一致，前後端行為對得起來）
+  const isReporter = isAssignee && mission.pending_status_reported_by === currentUser.id;
   // 標題外發光：只有「未結案+注目」才要亮，關掉（取消注目、或任務已結案）就是 0% 沒有發光。
   // 這是單純的兩個狀態互相切換（亮/不亮），不是像更新紀錄那種要反覆閃爍的動畫，純 CSS transition
   // 就能處理，不需要像 box-shadow 那個閃爍效果一樣寫 JS 逐幀計算。
@@ -2827,7 +2860,8 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
     transition: "text-shadow 600ms ease",
     textShadow: `0 0 4px rgba(${titleGlowRgb.r}, ${titleGlowRgb.g}, ${titleGlowRgb.b}, ${titleGlowAlpha}), 0 0 48px rgba(${titleGlowRgb.r}, ${titleGlowRgb.g}, ${titleGlowRgb.b}, ${titleGlowAlpha * 0.6})`,
   };
-  const canToggleChecklist = (isCreator || isAssignee) && !isClosed;
+  // 暫時完成/暫時棄置期間，檢查清單整個凍結——不能再打勾、不能再新增/刪除/編輯細節
+  const canToggleChecklist = (isCreator || isAssignee) && !isClosed && !isTaskPending;
   const typeLabel = mission.project_id ? "專案任務" : (mission.assigned_id === mission.creator_id ? "私人任務" : "私人指派任務");
   // 編輯時可選的指派對象：專案任務只能選專案成員；個人任務只能選自己或好友
   const assigneeChoices = mission.project_id
@@ -3653,7 +3687,7 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
 
         {mission.final_comment && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800 mb-4">
-            <strong>最終評論：</strong>{mission.final_comment}
+            <strong>{isTaskPending ? "暫時評論：" : "最終評論："}</strong>{mission.final_comment}
           </div>
         )}
 
@@ -3912,26 +3946,63 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             onCancel={() => setConfirmDeleteMission(false)}
           />
         )}
+        {confirmPendingAction && (
+          <ConfirmModal
+            title={confirmPendingAction === "disagree" ? (mission.status === "pending_completed" ? "不同意已完成" : "不同意已棄置") : (mission.status === "pending_completed" ? "取消已完成回報" : "取消不需要回報")}
+            message={`確定${confirmPendingAction === "disagree" ? "不同意這筆回報" : "取消這筆回報"}嗎？任務將退回「進行中」，暫時評論會被清空。`}
+            confirmLabel="確定"
+            onConfirm={resolvePendingAction}
+            onCancel={() => setConfirmPendingAction(null)}
+          />
+        )}
 
         {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mt-3">{err}</div>}
         </div>
 
-        {!isClosed && (
+        {!isClosed && (!isTaskPending || isCreator || isReporter) && (
           <div className="border-t border-slate-200 px-6 py-3 shrink-0">
             <div ref={statusFooterAnimRef}>
             {footerMode === "buttons" ? (
-              <div className="flex gap-2">
-                <button onClick={() => { setShowReplyForm(true); setReplyErr(null); }} className="text-xs bg-blue-600 text-white rounded-lg px-3 py-1.5">更新任務</button>
-                {isCreator && (
-                  <button onClick={() => { setPendingStatus("completed"); setStatusChangeErr(null); }} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">標記為已完成</button>
-                )}
-                {(isCreator || isAssignee) && mission.status !== "waiting" && (
-                  <button onClick={() => { setPendingStatus("waiting"); setStatusChangeErr(null); }} className="text-xs bg-amber-500 text-white rounded-lg px-3 py-1.5">標記為等待中</button>
-                )}
-                {isCreator && (
-                  <button onClick={() => { setPendingStatus("abandoned"); setStatusChangeErr(null); }} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">標記為已棄置</button>
-                )}
-              </div>
+              isTaskPending ? (
+                <div className="flex items-center gap-2">
+                  {isCreator && (
+                    <>
+                      <button onClick={() => { setPendingStatus(mission.status === "pending_completed" ? "completed" : "abandoned"); setFinalComment(mission.final_comment || ""); setStatusChangeErr(null); }}
+                        className={"text-xs text-white rounded-lg px-3 py-1.5 " + (mission.status === "pending_completed" ? "bg-emerald-600" : "bg-rose-600")}>
+                        {mission.status === "pending_completed" ? "同意已完成" : "同意已棄置"}
+                      </button>
+                      <button onClick={() => setConfirmPendingAction("disagree")} className="text-xs bg-slate-400 text-white rounded-lg px-3 py-1.5">
+                        {mission.status === "pending_completed" ? "不同意已完成" : "不同意已棄置"}
+                      </button>
+                    </>
+                  )}
+                  {!isCreator && isReporter && (
+                    <button onClick={() => setConfirmPendingAction("cancel_report")} className="text-xs bg-slate-400 text-white rounded-lg px-3 py-1.5">
+                      {mission.status === "pending_completed" ? "取消已完成回報" : "取消不需要回報"}
+                    </button>
+                  )}
+                  {pendingActionErr && <span className="text-xs text-rose-600">{pendingActionErr}</span>}
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowReplyForm(true); setReplyErr(null); }} className="text-xs bg-blue-600 text-white rounded-lg px-3 py-1.5">更新任務</button>
+                  {isCreator && (
+                    <button onClick={() => { setPendingStatus("completed"); setStatusChangeErr(null); }} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">標記為已完成</button>
+                  )}
+                  {isAssignee && !isCreator && (
+                    <button onClick={() => { setPendingStatus("pending_completed"); setStatusChangeErr(null); }} className="text-xs bg-emerald-600 text-white rounded-lg px-3 py-1.5">回報為已完成</button>
+                  )}
+                  {(isCreator || isAssignee) && mission.status !== "waiting" && (
+                    <button onClick={() => { setPendingStatus("waiting"); setStatusChangeErr(null); }} className="text-xs bg-amber-500 text-white rounded-lg px-3 py-1.5">標記為等待中</button>
+                  )}
+                  {isAssignee && !isCreator && (
+                    <button onClick={() => { setPendingStatus("pending_abandoned"); setStatusChangeErr(null); }} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">回報為不需要</button>
+                  )}
+                  {isCreator && (
+                    <button onClick={() => { setPendingStatus("abandoned"); setStatusChangeErr(null); }} className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5">標記為已棄置</button>
+                  )}
+                </div>
+              )
             ) : footerMode === "reply" ? (
               <div className="space-y-2">
                 <textarea rows={5} value={replyText} onChange={e => setReplyText(e.target.value)}
@@ -3946,11 +4017,21 @@ function MissionDetailModal({ missionId, currentUser, priorityLabels, scaleLabel
             ) : (
               <div className="space-y-2">
                 <label className="text-xs text-slate-800 bg-yellow-300 inline-block px-2 py-1 rounded-lg font-medium">
-                  {fieldLabelPrefix}{pendingStatus === "waiting" ? "切換為「等待中」前，請輸入等待中之事由" : `切換為「${STATUS_LABEL[pendingStatus]}」前，請填寫最終評論`}
+                  {fieldLabelPrefix}
+                  {pendingStatus === "waiting" ? "切換為「等待中」前，請輸入等待中之事由"
+                    : pendingStatus === "pending_completed" ? "回報為「已完成」前，請填寫暫時評論"
+                    : pendingStatus === "pending_abandoned" ? "回報為「不需要」前，請填寫暫時評論"
+                    : isTaskPending && pendingStatus === "completed" ? "同意這筆「已完成」回報前，請確認或修改最終評論"
+                    : isTaskPending && pendingStatus === "abandoned" ? "同意這筆「已棄置」回報前，請確認或修改最終評論"
+                    : `切換為「${STATUS_LABEL[pendingStatus]}」前，請填寫最終評論`}
                 </label>
                 <textarea rows={2} value={pendingStatus === "waiting" ? waitingReasonInput : finalComment}
                   onChange={e => pendingStatus === "waiting" ? setWaitingReasonInput(e.target.value) : setFinalComment(e.target.value)}
-                  placeholder={pendingStatus === "waiting" ? "請輸入等待中之事由…" : pendingStatus === "completed" ? "請輸入完成的評論…" : "請輸入棄置的理由…"}
+                  placeholder={pendingStatus === "waiting" ? "請輸入等待中之事由…"
+                    : pendingStatus === "completed" ? "請輸入完成的評論…"
+                    : pendingStatus === "pending_completed" ? "請輸入暫時評論…"
+                    : pendingStatus === "pending_abandoned" ? "請輸入暫時評論…"
+                    : "請輸入棄置的理由…"}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
                 <div className="flex items-center gap-2">
                   <button onClick={confirmStatusChange} disabled={busy} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5">確認切換</button>
@@ -4064,7 +4145,7 @@ function MissionListView({ missions, onOpen, priorityLabels, scaleLabels, priori
     const urgency = rd === null ? null : urgencyScore(rd, m.scale || 1);
     const isHidden = hiddenIds && hiddenIds.has(m.id);
     const isOwn = m.creator_id === currentUserId;
-    const isOpenStatus = m.status === "added" || m.status === "in_progress" || m.status === "waiting";
+    const isOpenStatus = statusTier(m.status) === 0;
     const isStarred = starredIds && starredIds.has(m.id);
     // 已完成/已棄置的任務不該再顯示「注目任務」的遮色提示——就算完成前有標記過，結案後就該回到正常樣式
     const rowStarStyle = (isStarred && isOpenStatus) ? starCellStyle : null;
@@ -6820,7 +6901,7 @@ function Dashboard({ session, profile, setProfile }) {
     for (const m of missions) {
       if (!m.project_id) continue;
       if (!map[m.project_id]) map[m.project_id] = { open: 0, completed: 0 };
-      if (m.status === "added" || m.status === "in_progress" || m.status === "waiting") map[m.project_id].open += 1;
+      if (statusTier(m.status) === 0) map[m.project_id].open += 1;
       else if (m.status === "completed") map[m.project_id].completed += 1;
     }
     return map;
@@ -6850,7 +6931,7 @@ function Dashboard({ session, profile, setProfile }) {
   const starredSet = new Set(starredIds);
   const visibleSorted = sortedMissions.filter(m => !hiddenSet.has(m.id));
 
-  const openMissionsAll = visibleSorted.filter(m => m.status === "added" || m.status === "in_progress" || m.status === "waiting");
+  const openMissionsAll = visibleSorted.filter(m => statusTier(m.status) === 0);
   const starredMissions = openMissionsAll.filter(m => starredSet.has(m.id));
   const openMissions = openMissionsAll.filter(m => !starredSet.has(m.id));
   const completedMissions = visibleSorted.filter(m => m.status === "completed").sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
@@ -6858,14 +6939,14 @@ function Dashboard({ session, profile, setProfile }) {
   const hiddenMissions = sortedMissions.filter(m => hiddenSet.has(m.id));
 
   const ganttMissions = sortMissions(
-    relationFilteredPersonal.filter(m => (m.status === "added" || m.status === "in_progress" || m.status === "waiting") && !hiddenSet.has(m.id)),
+    relationFilteredPersonal.filter(m => (statusTier(m.status) === 0) && !hiddenSet.has(m.id)),
     sortMode,
     profile.priority_weights
   );
 
   const currentProject = visibleProjects.find(p => p.id === openProjectId) || null;
   const projectMissionsRaw = visibleMissions.filter(m => m.project_id === openProjectId);
-  const projectOpenMissionsAll = projectMissionsRaw.filter(m => m.status === "added" || m.status === "in_progress" || m.status === "waiting");
+  const projectOpenMissionsAll = projectMissionsRaw.filter(m => statusTier(m.status) === 0);
   const projectMissionsFiltered = projectMissionsRaw.filter(m => relationFilter[relationCategory(m, profile.id)]);
   const projectSearchedMissions = appliedSearch
     ? projectMissionsFiltered.filter(m => {
@@ -6874,13 +6955,13 @@ function Dashboard({ session, profile, setProfile }) {
       })
     : projectMissionsFiltered;
   const projectAllMissions = sortMissions(projectSearchedMissions, sortMode, profile.priority_weights);
-  const projectOpenMissionsUnsorted = projectAllMissions.filter(m => m.status === "added" || m.status === "in_progress" || m.status === "waiting");
+  const projectOpenMissionsUnsorted = projectAllMissions.filter(m => statusTier(m.status) === 0);
   const projectStarredMissions = projectOpenMissionsUnsorted.filter(m => starredSet.has(m.id));
   const projectOpenMissions = projectOpenMissionsUnsorted.filter(m => !starredSet.has(m.id));
   const projectCompletedMissions = projectAllMissions.filter(m => m.status === "completed").sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
   const projectAbandonedMissions = projectAllMissions.filter(m => m.status === "abandoned").sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
   const projectGanttMissions = sortMissions(
-    projectMissionsFiltered.filter(m => (m.status === "added" || m.status === "in_progress" || m.status === "waiting") && !hiddenSet.has(m.id)),
+    projectMissionsFiltered.filter(m => (statusTier(m.status) === 0) && !hiddenSet.has(m.id)),
     sortMode,
     profile.priority_weights
   );
